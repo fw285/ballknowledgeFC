@@ -1,0 +1,23 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Games, the lobby list and match locks. Anyone with the site can play; nobody can delete.
+    match /games/{id} {
+      allow read, create, update: if true;
+      allow delete: if false;
+    }
+    match /lobby/{id} {
+      allow read: if true;
+      allow create, update: if request.resource.data.keys().hasOnly(['id','a','b','phase','result','createdAt','updatedAt']);
+      allow delete: if false;
+    }
+    match /locks/{id} {
+      allow read, create, update: if true;
+      allow delete: if false;
+    }
+    // Everything else is closed.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
