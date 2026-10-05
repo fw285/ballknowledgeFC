@@ -290,7 +290,7 @@ function makeSample(){
     catch(e) { throw {code:"upstream_error", message:String(e)}; }
     let j = {}; try { j = await r.json(); } catch(e) {}
     if (r.status === 401) { accessProblem = true; render(); throw {code:"bad_code", message:"Wrong access code"}; }
-    if (!r.ok) throw {code: r.status===429 ? "rate_limited" : "upstream_error", message: j.message || j.error || String(r.status)};
+    if (!r.ok) throw {code: r.status===429 ? "rate_limited" : "upstream_error", message: `HTTP ${r.status} ${j.error||""} ${j.message||""}`.trim()};
     accessProblem = false;
     return {text: j.text || "", truncated: !!j.truncated};
   };
@@ -652,8 +652,9 @@ const M = {
     if(!judge){ r.pending.ruling=null; r.step="review"; r.reviewDeadline=Date.now()+REVIEW_MS; }
     else r.step="judging";
   };},
-  handoff(key, failedSeat, code){ return st=>{
+  handoff(key, failedSeat, code, msg){ return st=>{
     const r=st.round; if(!r||r.key!==key||r.step!=="judging") return false;
+    r.pending.err = (code||"") + (msg ? ": "+String(msg).slice(0,200) : "");
     st.refOk = st.refOk||{};
     if(PERMANENT.has(code)) st.refOk[failedSeat]=false;
     const tried = r.pending.tried||[]; tried.push(failedSeat); r.pending.tried=tried;
@@ -745,7 +746,7 @@ Reply with only this JSON:
 ${shapes[bank]}`;
   let res;
   try{ res = await sample.json(prompt, {modelTier: st.settings?.refTier==="default"?"default":"quick", cache:false}); }
-  catch(e){ return {fail: (e && e.code) || "upstream_error"}; }
+  catch(e){ return {fail: (e && e.code) || "upstream_error", msg: (e && e.message) || ""}; }
   if(!res || typeof res!=="object") return {fail:"invalid_json"};
   const ru = {ai:true, ...res};
   if(cat.wild) ru.fitsCategory = true;
@@ -771,7 +772,7 @@ async function runJudge(){
   if(inflight[ik]) return; inflight[ik]=1;
   const key=r.key, pend=r.pending;
   const ruling = await judge(G, pend.p, pend.name, pend.slot);
-  if(ruling && ruling.fail){ await commit(M.handoff(key, mySeat, ruling.fail)); return; }
+  if(ruling && ruling.fail){ await commit(M.handoff(key, mySeat, ruling.fail, ruling.msg)); return; }
   await commit(M.setRuling(key, ruling, mySeat));
 }
 
@@ -1334,6 +1335,7 @@ function panelHTML(){
         <div class="verdict">${!ai?"No ruling":ru.valid?"Valid":"Invalid"}</div>
         <div><b>${esc(ru?.canonicalName||pend.name)}</b>${pend.slot?` · ${esc(pend.slot)}`:""}${ru?.nationalTeam?` · ${esc(ru.nationalTeam)}`:""}${ru?.retired?" · retired":""}</div>
         <div style="font-size:14px">${esc(ai?ru.reason:"Claude couldn't rule on this one, so the opponent decides.")}</div>
+        ${!ai&&pend.err?`<div class="muted" style="font-size:12px">Referee error: ${esc(pend.err)}</div>`:""}
       </div>
       ${mySeat===reviewer ? `<div class="btnrow">
           ${ai?`<button class="btn blue sm" data-rv="accept">Accept ruling</button><button class="btn ghost sm" data-rv="overrule">Overrule: make it ${ru.valid?"invalid":"valid"}</button>`
