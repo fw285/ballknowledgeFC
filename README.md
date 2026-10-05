@@ -11,6 +11,8 @@ Your own copy of the game, on your own domain. Three free accounts plus an Anthr
 Files in this folder:
 
 - `index.html`: the game
+- `engine.js`: the 2D match engine (players, tactics, ball physics). Deterministic, so both devices replay the same match from a shared seed
+- `engine-worker.js`: runs the engine off the main thread so the page stays smooth
 - `api/claude.js`: the server function; it holds your API key, and the page never sees it
 - `vercel.json`: gives the function up to 60 seconds for the match commentary
 - `firestore.rules`: database rules you paste into Firebase
