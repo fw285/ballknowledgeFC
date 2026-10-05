@@ -2,13 +2,23 @@
 // Your Anthropic API key lives in Vercel's environment variables, never in the page.
 //
 // Environment variables (set in Vercel → Project → Settings → Environment Variables):
-//   ANTHROPIC_API_KEY  (required) your key from console.anthropic.com
-//   ACCESS_CODE        (recommended) a password players type in the lobby
+//   ANTHROPIC_API_KEY or finnapikey  (required) your key from console.anthropic.com
+//   ACCESS_CODE or Access_code       (recommended) a password players type in the lobby
 //   MODEL_QUICK        (optional) model for referee rulings, default claude-haiku-4-5-20251001
 //   MODEL_DEFAULT      (optional) model for the match dossier/commentary, default claude-sonnet-5-5
 
 const hits = new Map(); // simple per-IP rate limit (per server instance)
 const LIMIT_PER_MIN = 40;
+
+// Read a setting by any of several names, ignoring capitalization.
+function env(...names) {
+  for (const n of names) if (process.env[n]) return process.env[n];
+  const want = names.map(n => n.toLowerCase());
+  for (const [k, v] of Object.entries(process.env)) if (v && want.includes(k.toLowerCase())) return v;
+  return "";
+}
+const API_KEY = () => env("ANTHROPIC_API_KEY", "finnapikey");
+const ACCESS = () => env("ACCESS_CODE", "Access_code");
 
 const MODEL_QUICK = () => process.env.MODEL_QUICK || "claude-haiku-4-5-20251001";
 const MODEL_DEFAULT = () => process.env.MODEL_DEFAULT || "claude-sonnet-5-5";
@@ -16,7 +26,7 @@ const MODEL_DEFAULT = () => process.env.MODEL_DEFAULT || "claude-sonnet-5-5";
 async function callClaude(model, maxTokens, prompt) {
   const r = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
-    headers: { "content-type": "application/json", "x-api-key": process.env.ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01" },
+    headers: { "content-type": "application/json", "x-api-key": API_KEY(), "anthropic-version": "2023-06-01" },
     body: JSON.stringify({
       model, max_tokens: maxTokens,
       system: "You are the referee and commentator for a friendly football draft game. When asked for JSON, reply with only valid JSON.",
@@ -32,13 +42,13 @@ module.exports = async (req, res) => {
   if (req.method === "GET") {
     const out = {
       functionDeployed: true,
-      apiKeySet: !!process.env.ANTHROPIC_API_KEY,
-      accessCodeSet: !!process.env.ACCESS_CODE,
+      apiKeySet: !!API_KEY(),
+      accessCodeSet: !!ACCESS(),
       models: { referee: MODEL_QUICK(), commentary: MODEL_DEFAULT() }
     };
     const q = req.query || {};
     const wantTest = q.test === "1" || /[?&]test=1/.test(req.url || "");
-    const codeOk = !process.env.ACCESS_CODE || q.code === process.env.ACCESS_CODE || new RegExp("[?&]code=" + encodeURIComponent(process.env.ACCESS_CODE) + "(&|$)").test(req.url || "");
+    const codeOk = !ACCESS() || q.code === ACCESS() || new RegExp("[?&]code=" + encodeURIComponent(ACCESS()) + "(&|$)").test(req.url || "");
     if (wantTest && !codeOk) out.test = "Add &code=YOUR_ACCESS_CODE to the address to run the live test.";
     if (wantTest && codeOk && out.apiKeySet) {
       for (const [label, model] of [["referee", MODEL_QUICK()], ["commentary", MODEL_DEFAULT()]]) {
@@ -53,10 +63,10 @@ module.exports = async (req, res) => {
   if (req.method !== "POST") return res.status(405).json({ error: "method_not_allowed" });
 
   const code = String(req.headers["x-access-code"] || "");
-  if (process.env.ACCESS_CODE && code !== process.env.ACCESS_CODE) {
+  if (ACCESS() && code !== ACCESS()) {
     return res.status(401).json({ error: "bad_code" });
   }
-  if (!process.env.ANTHROPIC_API_KEY) {
+  if (!API_KEY()) {
     return res.status(500).json({ error: "missing_key", message: "ANTHROPIC_API_KEY is not set on the server." });
   }
 
