@@ -286,16 +286,16 @@ function parseLooseJSON(t){
 function makeSample(){
   const call = async (prompt, opts={}) => {
     let r;
-    try { r = await fetch(API_URL, {method:"POST", headers:{"content-type":"application/json", "x-access-code": lsGet("dn_code")||""}, body:JSON.stringify({prompt, tier: opts.modelTier||"default"})}); }
+    try { r = await fetch(API_URL, {method:"POST", headers:{"content-type":"application/json", "x-access-code": lsGet("dn_code")||""}, body:JSON.stringify({prompt, tier: opts.modelTier||"default", search: !!opts.search})}); }
     catch(e) { throw {code:"upstream_error", message:String(e)}; }
     let j = {}; try { j = await r.json(); } catch(e) {}
     if (r.status === 401) { accessProblem = true; render(); throw {code:"bad_code", message:"Wrong access code"}; }
     if (!r.ok) throw {code: r.status===429 ? "rate_limited" : "upstream_error", message: `HTTP ${r.status} ${j.error||""} ${j.message||""}`.trim()};
     accessProblem = false;
-    return {text: j.text || "", truncated: !!j.truncated};
+    return {text: j.text || "", truncated: !!j.truncated, searches: j.searches || 0};
   };
   const fn = (p, o) => call(p, o);
-  fn.json = async (p, o) => parseLooseJSON((await call(p, o)).text);
+  fn.json = async (p, o) => { const c = await call(p, o); const v = parseLooseJSON(c.text); if (v && typeof v === "object" && !Array.isArray(v) && c.searches) v._searches = c.searches; return v; };
   return fn;
 }
 let accessProblem = false;
@@ -714,7 +714,8 @@ async function judge(st, seat, name, slot){
   const drafted = allDrafted(st);
   if(drafted.some(n=>norm(n)===norm(name))) return {ai:true, duplicate:true, recognized:true};
   if(!sample) return {fail:"unavailable"};
-  const today = new Date().toLocaleDateString("en-US",{month:"long",year:"numeric"});
+  const now = new Date(), today = now.toLocaleDateString("en-US",{day:"numeric",month:"long",year:"numeric"});
+  const yy = now.getFullYear(), season = now.getMonth()>=6 ? `${yy}/${String(yy+1).slice(2)}` : `${yy-1}/${String(yy).slice(2)}`;
   const diceRule = r.dice && DICE[r.dice].ai ? DICE[r.dice].n.toUpperCase()+": "+DICE[r.dice].ai : "none";
   const slotRole = kind==="sub" ? "any position (substitute)" : (slot ? slotInfo(sq,slot).label : "n/a");
   const bank = kind==="starter"||kind==="sub"||kind==="bonus" ? "player" : kind;
@@ -724,8 +725,13 @@ async function judge(st, seat, name, slot){
     stadium:`{"recognized":true,"canonicalName":"Stadium name","fitsCategory":true,"duplicate":false,"reason":"1-2 short sentences","city":"City","capacity":60000,"atmosphere":8,"altitudeMeters":0}`,
     aura:`{"recognized":true,"canonicalName":"Short title of the moment","fitsCategory":true,"duplicate":false,"reason":"1-2 short sentences","trigger":"one of ${Object.keys(AURA_TRIGGERS).join("|")}","effectText":"One sentence on how it will echo in the match"}`
   };
-  const prompt = `You are the referee in a 1v1 football (soccer) draft game between two friends. Today is ${today}. Rule on ONE pick, fairly and quickly.
-Use your football knowledge. Facts after your training data may be newer than you know: if a pick is plausible but depends on a very recent transfer or event you can't confirm, give the benefit of the doubt and say so in the reason.
+  const prompt = `You are the referee in a 1v1 football (soccer) draft game between two friends. Today is ${today}; the current season is ${season}. Rule on ONE pick, fairly and quickly.
+Your built-in football knowledge stops around mid-2026, so you do NOT know the summer 2026 transfer window or anything since. You have a web_search tool:
+- Search when the ruling depends on the present: a player's CURRENT club or league, his current age, whether he has retired, recent call-ups, or any event from 2026 onward. One short query such as "<player> current club ${season}" is usually enough.
+- If you don't recognize the name, search before setting recognized=false; it may be a new breakout player.
+- Don't search for settled history (old clubs, career trophies, prime ratings) you already know.
+- If searching doesn't settle it, give the benefit of the doubt and say so in the reason.
+- Squads, ages and clubs in your JSON should reflect ${season}.
 
 CATEGORY: "${cat.wild?"Wildcard: any player (always fits)":cat.t}" (${cat.h||""})
 EXTRA DICE RULE: ${bank==="player"?diceRule:"none"}
@@ -742,13 +748,13 @@ Rules:
 - duplicate: true if the pick is the same person or thing as anything in the drafted list.
 - ${RATING_SCALE}
 - clubs: up to 8 main senior clubs, short common names. fiery: true if known for cards or temper.
-Reply with only this JSON:
+After any searching, your final reply must be only this JSON:
 ${shapes[bank]}`;
   let res;
-  try{ res = await sample.json(prompt, {modelTier: st.settings?.refTier==="default"?"default":"quick", cache:false}); }
+  try{ res = await sample.json(prompt, {modelTier: st.settings?.refTier==="default"?"default":"quick", cache:false, search:true}); }
   catch(e){ return {fail: (e && e.code) || "upstream_error", msg: (e && e.message) || ""}; }
   if(!res || typeof res!=="object") return {fail:"invalid_json"};
-  const ru = {ai:true, ...res};
+  const ru = {ai:true, ...res}; if(ru._searches){ ru.searched = ru._searches; delete ru._searches; }
   if(cat.wild) ru.fitsCategory = true;
   ru.fitsDice = bank==="player" ? ru.fitsDice!==false : true;
   ru.fitsPosition = bank==="player" ? (kind==="sub" ? true : ru.fitsPosition!==false) : true;
@@ -1196,7 +1202,7 @@ function lobbyHTML(){
       <div class="field"><label for="team">Team name</label><input id="team" maxlength="24" placeholder="Brookline FC" value="${team}"></div>
       <div class="field"><label for="formation">Formation</label><select id="formation">${Object.keys(FORMATIONS).map(f=>`<option ${f===form?"selected":""}>${f}</option>`).join("")}</select></div>
       <div class="field"><label for="acode">Access code</label><input id="acode" type="password" autocomplete="off" placeholder="From the host" value="${esc(lsGet("dn_code")||"")}"></div>
-      <div class="field"><label for="reftier">Referee</label><select id="reftier"><option value="quick">Quick (seconds)</option><option value="default">Thorough (slower)</option></select></div>
+      <div class="field"><label for="reftier">Referee</label><select id="reftier"><option value="quick">Quick (up to 2 lookups)</option><option value="default">Thorough (up to 4 lookups)</option></select></div>
     </div>
     <div class="btnrow"><button class="btn blue" id="create" ${!db||!canWrite?"disabled":""}>Create a game</button><span class="muted" style="align-self:center;font-size:13px">Then send your friend the game code.</span></div>
    </section>
@@ -1334,7 +1340,7 @@ function panelHTML(){
       <div class="ruling ${verdict}">
         <div class="verdict">${!ai?"No ruling":ru.valid?"Valid":"Invalid"}</div>
         <div><b>${esc(ru?.canonicalName||pend.name)}</b>${pend.slot?` · ${esc(pend.slot)}`:""}${ru?.nationalTeam?` · ${esc(ru.nationalTeam)}`:""}${ru?.retired?" · retired":""}</div>
-        <div style="font-size:14px">${esc(ai?ru.reason:"Claude couldn't rule on this one, so the opponent decides.")}</div>
+        <div style="font-size:14px">${esc(ai?ru.reason:"Claude couldn't rule on this one, so the opponent decides.")}${ai&&ru.searched?` <span style="opacity:.6;font-size:12px">· checked online</span>`:""}</div>
         ${!ai&&pend.err?`<div class="muted" style="font-size:12px">Referee error: ${esc(pend.err)}</div>`:""}
       </div>
       ${mySeat===reviewer ? `<div class="btnrow">
