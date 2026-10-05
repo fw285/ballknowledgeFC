@@ -448,7 +448,30 @@ const SPECIAL_CATS = [
  {t:"A player whose career was derailed by injuries",h:"Subjective, but it has to be a fair description."},
  {t:"Looked destined for greatness at 19",h:"Subjective. Whether he got there or not."},
  {t:"A player rival fans love to hate",h:"Subjective."},
- {t:"A cult hero at one of his clubs",h:"Subjective. Loved beyond his stats."}
+ {t:"A cult hero at one of his clubs",h:"Subjective. Loved beyond his stats."},
+ // workshop additions (Oct 2026), appended at the end so existing ids don't shift
+ {t:"Has scored in a World Cup final",h:"Any final. Shootouts don't count."},
+ {t:"Has scored an own goal at a World Cup or Euros",h:"Any match at the tournament."},
+ {t:"Has scored four or more goals in one top-five-league match",h:"Premier League, La Liga, Serie A, Bundesliga or Ligue 1."},
+ {t:"Scored the winner in a major final in the 85th minute or later",h:"Extra time counts. Domestic cup, league cup, European or international final."},
+ {t:"Has played in at least four of Europe's top five leagues",h:"England, Spain, Italy, Germany, France. The hard version."},
+ {t:"Is a one-club man with 10+ senior seasons",h:"Never moved permanently. Loans are fine.",old:1},
+ {t:"Has won the Champions League with two different clubs",h:"In the winning squad both times.",old:1},
+ {t:"Has finished top scorer in a top-five league",h:"Outright or shared. Golden Boot, Pichichi, Capocannoniere..."},
+ {t:"Has 300+ career appearances and no major trophy",h:"League, domestic cup, league cup, European or international title. Super cups don't count.",old:1},
+ {t:"Has 90 or more pace on his EA FC 27 base card",h:"Base gold card, not promos."},
+ {t:"Has a 5-star weak foot in FIFA or EA FC",h:"Any edition."},
+ {t:"Has 85 or more physical on his EA FC 27 base card",h:"Base gold card, not promos."},
+ {t:"Is 5 ft 7 in (170 cm) or shorter and rated 80+ in EA FC 27",h:"Small but elite. Base card."},
+ {t:"Is an outfield player 6 ft 4 in (193 cm) or taller",h:"Listed height. Goalkeepers don't count."},
+ {t:"Has been frozen out or publicly slammed by his own manager",h:"Subjective. A widely reported falling-out."},
+ {t:"Has switched international allegiance",h:"Capped by one nation at any level, then a senior cap for another.",nat:1},
+ {t:"Represents a country that has never played at a men's World Cup",h:"2026 debutants like Cape Verde, Curaçao and Jordan no longer count.",nat:1},
+ {t:"Represents a country of fewer than 5 million people",h:"Uruguay, Croatia, Wales, Georgia, Slovenia...",nat:1},
+ {t:"Has scored at a World Cup after coming off the bench",h:"Any World Cup, shootouts don't count."},
+ {t:"Scored 20+ league goals in a season aged 33 or older",h:"Age at the start of that season.",old:1},
+ {t:"Is English and currently plays abroad",h:"Any club outside England.",nat:1},
+ {t:"Is currently on loan",h:"This season."}
 ].map((c,i)=>({...c, id:"s"+i}));
 const CLUBS = ["Real Madrid","Barcelona","Atlético Madrid","Sevilla","Valencia","Villarreal","Bayern Munich","Borussia Dortmund","Bayer Leverkusen","RB Leipzig","Wolfsburg","Juventus","AC Milan","Inter Milan","Roma","Napoli","Lazio","Fiorentina","Paris Saint-Germain","Marseille","Lyon","Monaco","Manchester United","Manchester City","Liverpool","Arsenal","Chelsea","Tottenham","Aston Villa","Everton","Newcastle United","Ajax","PSV","Benfica","Porto","Sporting CP","Celtic","Galatasaray","Inter Miami","Al-Nassr or Al-Hilal"];
 const NATIONS = ["Portugal","the Netherlands","Belgium","Croatia","Uruguay","Colombia","Senegal","Nigeria","Japan","the USA","Norway","Denmark","Morocco","Mexico","Ivory Coast","Scotland","Wales","Serbia","Switzerland","Poland","Austria","South Korea","Egypt","Ghana","Cameroon","Sweden","Turkey","Chile","Algeria","Ecuador","Brazil","Argentina","France","England","Spain","Germany","Italy"];
