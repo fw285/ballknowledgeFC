@@ -1116,39 +1116,53 @@ function templLine(e, sim){
   return "";
 }
 
-/* Claude-written dossier + commentary for the engine's match */
-async function writeReport(st, input, sim){
-  if(!sample) return null;
+/* Claude-written dossier and commentary for the engine's match. Two smaller calls instead of one big one:
+   the dossier is ready in seconds, the commentary arrives while the first highlights play. */
+function reportTeams(st, input){
   const tacText = t => `press ${t.press}/10, line ${t.line}/10, width ${t.width}/10, tempo ${t.tempo}/10, mentality ${t.mentality}/10, ${t.buildUp} build-up, ${t.fullbacks} full-backs${t.counter?", counter-attacks":""}`;
   const team = p => { const sq=st.squads[p], ti=input.teams[p]; return {
     name: st.players[p].team, formation: sq.formation, manager: sq.manager?.name ? `${sq.manager.name} (${sq.manager.style||"pragmatic"})` : "none", tactics: tacText(ti.tactics),
     stadium: sq.stadium?.name||"none", aura: sq.aura?.name? `${sq.aura.name} (${sq.aura.effect||""})`:"none", captain: sq.captain,
     xi: slotsOf(sq.formation).map(s=>{ const v=sq.slots[s.k]; return `${s.k}: ${v&&v.name?v.name+(v.random?" [random wheel pick]":"")+(v.golden?" [golden form]":"")+(v.tags?.length?` {${v.tags.join(", ")}}`:"")+` (${v.rating||"?"})`:"EMPTY"}`; }),
     bench: sq.subs.map(v=>v&&v.name?v.name:"empty"), chemistry: chemLinks(sq).slice(0,8).map(l=>`${l.a.k}-${l.b.k} (${l.why.join(", ")})`) }; };
-  const idx = keyEventIdx(sim);
+  return {A:team("A"), B:team("B")};
+}
+async function writeDossier(st, input, sim){
+  if(!sample) return null;
+  const T = reportTeams(st, input);
+  const prompt = `Write the pre-match scouting material for a simulated football match in a draft game between two friends. Players appear at their peak. Be vivid, specific and knowledgeable about the real players and managers, but brief.
+PRE-MATCH ROLLS: ${JSON.stringify(sim.rolls)}
+TEAM A: ${JSON.stringify(T.A)}
+TEAM B: ${JSON.stringify(T.B)}
+Reply with only JSON:
+{"headline":"A pre-match headline","dossier":["3 short paragraphs: how each manager's tactics will shape the game (pressing, line, full-backs, build-up), the key strengths and weak spots (wheel picks, golden players, chemistry, playstyles), the conditions"],"keyBattles":["3 one-sentence matchups"]}
+Nothing may hint at the result: you don't know it.`;
+  try{ const res = await sample.json(prompt, {modelTier:"fast", cache:false, timeoutMs:40000}); if(res && typeof res==="object" && Array.isArray(res.dossier)) return {headline:res.headline, dossier:res.dossier.slice(0,4).map(String), keyBattles:(res.keyBattles||[]).slice(0,4).map(String)}; }
+  catch(e){ console.warn("dossier", e); }
+  return null;
+}
+async function writeLines(st, input, sim){
+  if(!sample) return null;
+  const idx = keyEventIdx(sim).slice(0,32);
   const evs = idx.map(i=>{ const e=sim.events[i]; const o={i, min:minLabel(sim,e), type:e.type, team:e.team?st.players[e.team].team:""};
     if(e.p!=null) o.player=fullOf(sim,e.p); if(e.assist!=null) o.assist=fullOf(sim,e.assist); if(e.out!=null) o.off=fullOf(sim,e.out); if(e.keeper!=null) o.keeper=fullOf(sim,e.keeper); if(e.victim!=null) o.fouled=fullOf(sim,e.victim);
-    if(e.method?.length) o.how=e.method.join(", "); if(e.xg!=null) o.xg=e.xg; if(e.outcome) o.outcome=e.outcome; if(e.score) o.score=`${e.score.A}-${e.score.B}`; if(e.name) o.aura=e.name; if(e.kind) o.kind=e.kind; if(e.og) o.ownGoal=true; if(e.second) o.secondYellow=true;
+    if(e.method?.length) o.how=e.method.join(", "); if(e.xg!=null) o.xg=e.xg; if(e.outcome) o.outcome=e.outcome; if(e.score) o.score=`${e.score.A}-${e.score.B}`; if(e.name) o.aura=e.name; if(e.kind) o.kind=e.kind; if(e.og) o.ownGoal=true; if(e.second) o.secondYellow=true; if(e.why) o.reason=e.why;
     return o; });
   const top = side => sim.ents.filter(p=>p.team===side && p.played).sort((a,b)=>b.rating-a.rating).slice(0,3).map(p=>`${p.name} ${p.rating}`);
   const motm = sim.motm!=null ? sim.ents[sim.motm].name : "";
-  const prompt = `Write the match material for a simulated football match in a draft game between two friends. Players appear in their prime. Be vivid, specific and knowledgeable about the real players and managers, but brief.
-
-PRE-MATCH ROLLS: ${JSON.stringify(sim.rolls)}
-TEAM A: ${JSON.stringify(team("A"))}
-TEAM B: ${JSON.stringify(team("B"))}
+  const managers = `${st.players.A.team}: ${st.squads.A.manager?.name||"no manager"}; ${st.players.B.team}: ${st.squads.B.manager?.name||"no manager"}`;
+  const prompt = `Write live commentary for a simulated football match between two friends' drafted teams. Players appear at their peak. Be vivid and knowledgeable about the real players, but brief.
+TEAMS: ${st.players.A.team} vs ${st.players.B.team}. Managers: ${managers}.
 KEY MOMENTS (already decided by the match engine; do not change them): ${JSON.stringify(evs)}
 FINAL: ${st.players.A.team} ${sim.final.A}-${sim.final.B} ${st.players.B.team}${sim.pens?` (penalties ${sim.pens.A}-${sim.pens.B})`:""}
 STATS: ${JSON.stringify(sim.stats)}
 TOP RATINGS: ${st.players.A.team}: ${top("A").join(", ")}; ${st.players.B.team}: ${top("B").join(", ")}. Player of the match: ${motm}.
-
-Reply with only JSON:
-{"headline":"A pre-match headline that does NOT reveal the result","dossier":["3 short paragraphs of pre-match scouting: how each manager's tactics will shape the game (pressing, line, full-backs, build-up), the key strengths and weak spots (filler picks, golden players, chemistry, playstyles), the conditions. Must NOT hint at the result."],"keyBattles":["3 one-sentence matchups"],"lines":{"<i>":"one commentary sentence for that key moment"},"verdict":"2-3 sentences explaining why the match went the way it did, mentioning tactics and momentum"}
-Write a line for EVERY key moment, keyed by its "i". Keep each line under 26 words. Describe how goals were scored using "how".`;
+Reply with only JSON: {"lines":{"<i>":"one commentary sentence for that moment"},"verdict":"2-3 sentences on why the match went the way it did, mentioning tactics and momentum"}
+Write a line for every key moment, keyed by its "i", each under 20 words. Describe how goals were scored using "how".`;
   try{
-    const res = await sample.json(prompt, {modelTier:"default", cache:false});
-    if(res && typeof res==="object"){ if(res.lines && typeof res.lines==="object"){ const L={}; for(const k in res.lines) if(String(res.lines[k]).trim()) L[k]=String(res.lines[k]).slice(0,240); res.lines=L; } return res; }
-  }catch(e){ console.warn("report", e); }
+    const res = await sample.json(prompt, {modelTier:"default", cache:false, timeoutMs:55000});
+    if(res && typeof res==="object"){ const L={}; if(res.lines && typeof res.lines==="object") for(const k in res.lines) if(String(res.lines[k]).trim()) L[k]=String(res.lines[k]).slice(0,240); return {lines:L, verdict: res.verdict?String(res.verdict).slice(0,600):undefined}; }
+  }catch(e){ console.warn("lines", e); }
   return null;
 }
 
@@ -1282,25 +1296,30 @@ async function review(action){ if(!G?.round) return; await commit(M.resolve(G.ro
 async function runMatch(){
   if(!G || G.phase!=="prematch") return;
   try{ const l = await gameRef.acquire({holder:me.id, ttlMs:180000}); if(!l.acquired) return; }catch(e){}
-  const ok0 = await commit(st=>{ if(st.phase!=="prematch") return false; st.phase="report"; st.reportStartedAt=Date.now(); pushLog(st,"The teams are out. Simulating the match and writing the dossier."); });
+  const ok0 = await commit(st=>{ if(st.phase!=="prematch") return false; st.phase="report"; st.reportStartedAt=Date.now(); pushLog(st,"The teams are out. Simulating the match."); });
   if(!ok0) return;
-  if(prepRunning) await prepRunning;
+  // give the background scouting a few more seconds, but never hold up kick-off for it:
+  // anyone still unscouted plays on stats estimated from his rating
+  if(prepRunning) await Promise.race([prepRunning, new Promise(r=>setTimeout(r, 8000))]);
   const fresh = structuredClone((await gameRef.get()).data()); if(!fresh || fresh.phase!=="report") return;
-  const {need, mgrs} = backfillNeeds(fresh);
-  if(need.length || mgrs.length) await backfillSquads(fresh);
   const seed = (Math.floor(Math.random()*2**31)>>>0) || 7;
   const tac = {A:teamTactics(fresh,"A"), B:teamTactics(fresh,"B")};
   const input = buildEngineInput(fresh, seed, tac);
   const sim = await runEngine(input);
   if(!sim){ await commit(st=>{ if(st.phase!=="report") return false; st.phase="prematch"; pushLog(st,"The match engine failed to start. Trying again."); }); return; }
   SIMCACHE = {key: G.id+":"+seed, sim};
-  const report = await writeReport(fresh, input, sim);
-  await commit(st=>{ if(st.phase!=="report") return false;
+  const ok1 = await commit(st=>{ if(st.phase!=="report") return false;
     st.squads = fresh.squads;
     st.match = {v:ENGINE_VERSION, seed, tac, level: fresh.pre?.level||"extended", digest: sim.digest,
       final: sim.final, pens: sim.pens?{A:sim.pens.A, B:sim.pens.B}:null, winner: sim.winner, stats: sim.stats,
-      motm: sim.motm!=null ? sim.ents[sim.motm].name : null, rolls: sim.rolls, report, kickoffAt: Date.now()+(report?25000:9000)};
+      motm: sim.motm!=null ? sim.ents[sim.motm].name : null, rolls: sim.rolls, report:null, reportPending:!!sample, kickoffAt: Date.now()+(sample?20000:8000)};
     st.phase="match"; });
+  if(!ok1 || !sample) return;
+  // Claude writes the dossier (short, shown before kick-off) and the commentary (longer, used as the highlights play) at the same time.
+  const save = part => commit(st=>{ if(st.phase!=="match" || !st.match || st.match.seed!==seed) return false; st.match.report = {...(st.match.report||{}), ...part}; if(part.lines) st.match.reportPending=false; });
+  const dossier = writeDossier(fresh, input, sim).then(d=>{ if(d) return save(d); });
+  const lines = writeLines(fresh, input, sim).then(l=>save(l || {lines:{}}));
+  await Promise.allSettled([dossier, lines]);
 }
 async function rematch(){
   await commit(st=>{
@@ -1658,7 +1677,7 @@ function prematchHTML(){
   const writing = G.phase==="report";
   if(writing || !G.pre) return `<section class="board"><div style="min-width:0"><div class="meta"><span>Kick-off</span></div>
     <div class="cat">${writing?"The teams are coming out":"Getting ready"}</div>
-    <div class="hint"><span class="spin"></span>&nbsp; Simulating the match and writing the scouting dossier. This takes about half a minute.</div></div></section>
+    <div class="hint"><span class="spin"></span>&nbsp; Simulating the match. Kick-off in a few seconds.</div></div></section>
     <div class="arena two">${teamHTML(mySeat||"A")}${teamHTML(other(mySeat||"A"))}</div>`;
   const left=mySeat||"A", right=other(left), lv=G.pre.level||"extended";
   const prepping = G.pre.prep!=="done";
@@ -1997,7 +2016,7 @@ function matchHTML(){
            ${ro.ref?rollChip("Referee", ro.ref.name, ro.ref.roll):""}
            ${["A","B"].map(p=>{ const i=ro["injury"+p]; if(!i) return ""; return rollChip(`Injury check · ${G.players[p].team}`, i.roll===1?`${i.who} OUT${i.replacedBy?", "+i.replacedBy+" starts":""}`:`${i.who} fit`, i.roll); }).join("")}
          </div>
-         ${(rep?.dossier||[]).map(p=>`<p>${esc(p)}</p>`).join("") || `<p class="muted">Claude's dossier isn't available for this match, so the game is using its own commentary.</p>`}
+         ${(rep?.dossier||[]).map(p=>`<p>${esc(p)}</p>`).join("") || (m.reportPending ? `<p class="muted"><span class="spin" style="width:14px;height:14px;border-width:2px"></span>&nbsp; Claude is writing the dossier…</p>` : `<p class="muted">Claude's dossier isn't available for this match, so the game is using its own commentary.</p>`)}
          ${rep?.keyBattles?.length?`<div class="eyebrow">Key battles</div><ul style="margin:0;padding-left:18px;display:grid;gap:4px">${rep.keyBattles.map(k=>`<li>${esc(k)}</li>`).join("")}</ul>`:""}
        </div>
      </div>
