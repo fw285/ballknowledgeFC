@@ -4,7 +4,8 @@
 // Environment variables (set in Vercel → Project → Settings → Environment Variables):
 //   ANTHROPIC_API_KEY or finnapikey  (required) your key from console.anthropic.com
 //   ACCESS_CODE or Access_code       (recommended) a password players type in the lobby
-//   MODEL_QUICK        (optional) model for referee rulings, default claude-sonnet-5-5
+//   MODEL_FAST         (optional) model for the referee's quick first look (no web search), default claude-haiku-4-5-20251001
+//   MODEL_QUICK        (optional) model for referee rulings that need a web search, default claude-sonnet-5-5
 //   MODEL_DEFAULT      (optional) model for the match dossier/commentary, default claude-sonnet-5-5
 //   WEB_SEARCH         (optional) set to "off" to stop the referee looking things up
 
@@ -23,6 +24,7 @@ const API_KEY = () => env("ANTHROPIC_API_KEY", "finnapikey").trim();
 const ACCESS = () => env("ACCESS_CODE", "Access_code").trim();
 const SEARCH_ON = () => env("WEB_SEARCH").toLowerCase() !== "off";
 
+const MODEL_FAST = () => env("MODEL_FAST") || "claude-haiku-4-5-20251001";
 const MODEL_QUICK = () => env("MODEL_QUICK") || "claude-sonnet-5-5";
 const MODEL_DEFAULT = () => env("MODEL_DEFAULT") || "claude-sonnet-5-5";
 
@@ -75,7 +77,7 @@ module.exports = async (req, res) => {
       apiKeySet: !!API_KEY(),
       accessCodeSet: !!ACCESS(),
       webSearch: SEARCH_ON(),
-      models: { referee: MODEL_QUICK(), commentary: MODEL_DEFAULT() }
+      models: { refereeFast: MODEL_FAST(), referee: MODEL_QUICK(), commentary: MODEL_DEFAULT() }
     };
     const q = req.query || {};
     const wantTest = q.test === "1" || /[?&]test=1/.test(req.url || "");
@@ -119,16 +121,16 @@ module.exports = async (req, res) => {
   let body = req.body;
   if (typeof body === "string") { try { body = JSON.parse(body); } catch (e) { body = {}; } }
   const prompt = body && body.prompt;
-  const tier = body && body.tier === "quick" ? "quick" : "default";
+  const tier = body && (body.tier === "quick" || body.tier === "fast") ? body.tier : "default";
   if (typeof prompt !== "string" || !prompt.trim() || prompt.length > 60000) {
     return res.status(400).json({ error: "bad_prompt" });
   }
 
-  const model = tier === "quick" ? MODEL_QUICK() : MODEL_DEFAULT();
-  const searches = body.search && SEARCH_ON() ? (tier === "quick" ? 2 : 4) : 0;
+  const model = tier === "fast" ? MODEL_FAST() : tier === "quick" ? MODEL_QUICK() : MODEL_DEFAULT();
+  const searches = tier === "fast" ? 0 : body.search && SEARCH_ON() ? (tier === "quick" ? 2 : 4) : 0;
 
   try {
-    const { r, j } = await callClaude(model, tier === "quick" ? 1500 : 4000, prompt, searches);
+    const { r, j } = await callClaude(model, tier === "default" ? 4000 : 1500, prompt, searches);
     if (!r.ok) {
       return res.status(r.status === 429 ? 429 : 502).json({ error: (j.error && j.error.type) || "upstream_error", message: (j.error && j.error.message) || "" });
     }

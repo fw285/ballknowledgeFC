@@ -13,6 +13,8 @@ Files in this folder:
 - `index.html`: the game
 - `engine.js`: the 2D match engine (players, tactics, ball physics). Deterministic, so both devices replay the same match from a shared seed
 - `engine-worker.js`: runs the engine off the main thread so the page stays smooth
+- `questions.js`: every draft question (players, managers, stadiums, auras). Edit this to change the questions
+- `random-players.js`: the wheel's player pool and odds for slots lost to timeouts or wrong answers
 - `api/claude.js`: the server function; it holds your API key, and the page never sees it
 - `vercel.json`: gives the function up to 60 seconds for the match commentary
 - `firestore.rules`: database rules you paste into Firebase
@@ -85,6 +87,6 @@ Send your friend the link and the access code. Each of you enters a team name an
 
 ### Cost control
 
-- Referee rulings use Claude Haiku (fast and cheap). The pre-match dossier and commentary use Claude Sonnet.
+- Referee rulings: Claude Haiku takes a quick first look (no web search). Anything about the present day, or a name it doesn't know, goes to Claude Sonnet with web search. The pre-match dossier and commentary use Claude Sonnet.
 - To make everything cheaper, add the environment variable `MODEL_DEFAULT` = `claude-haiku-4-5-20251001` in Vercel. The commentary gets a bit less colorful, and the cost per game drops a lot.
 - The function also limits each visitor to 40 calls a minute, and rejects anyone without the access code.

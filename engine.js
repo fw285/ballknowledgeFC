@@ -156,7 +156,9 @@ export function simulateMatch(input) {
   const rolls = {};
   for (const team of teams) {
     if (!team.players.length) continue;
-    const victim = team.players[floor(R() * team.players.length)], roll = d6();
+    // the keeper only gets injured if there's a keeper on the bench to replace him
+    const pool = team.bench.some(b => b.G === "GK") ? team.players : team.players.filter(p => p.G !== "GK");
+    const victim = pool[floor(R() * pool.length)], roll = d6();
     rolls["injury" + team.side] = { who: victim.name, roll };
     if (roll === 1) {
       const repl = team.bench.find(b => b.G === victim.G) || team.bench.find(b => b.G !== "GK") || team.bench[0];
@@ -465,12 +467,12 @@ export function simulateMatch(input) {
     if (from) { B.tried[from.id] = B.flight; B.kicker = from; B.kickTick = S.tick; }
     B.kickPos = { x: B.x, y: B.y };
     if (opts.loft) {
-      const t = opts.T || (0.8 + d / 26);
+      const t = opts.T || (0.7 + d / 30);
       B.z = opts.z0 || 0.1; B.vz = 4.905 * t - B.z / t; const vh = d / t * (1 + 0.006 * d / t);
       B.vx = dx / d * vh; B.vy = dy / d * vh;
       return t;
     }
-    const ve = opts.arriveSpeed != null ? opts.arriveSpeed : 6 + 0.12 * d;
+    const ve = opts.arriveSpeed != null ? opts.arriveSpeed : min(16, 8.5 + 0.18 * d);
     let v0 = sqrt(ve * ve + 2 * FRIC * d);
     for (let i = 0; i < 3; i++) v0 = sqrt(ve * ve + 2 * (FRIC + 0.03 * (v0 + ve) / 2) * d);
     if (opts.speed) v0 = opts.speed;
@@ -714,7 +716,7 @@ export function simulateMatch(input) {
       let ty = cy;
       if (info.forced === "goal" && info.pen) ty = gk.y + (cy > gk.y ? -1 : 1) * rr(1.5, 2.8);
       const react = info.pen ? 0.02 : 0.12 + 0.18 * (1 - gk.a.gkr);
-      gk.dive = { x: cx, y: clamp(ty, CY - GH - 1, CY + GH + 1), start: S.tick + round(react / DT), until: S.tick + round(react / DT) + 8, v: 4.5 + 3.5 * gk.a.gkr };
+      gk.dive = { x: cx, y: clamp(ty, CY - GH - 1, CY + GH + 1), start: S.tick + round(react / DT), until: S.tick + round(react / DT) + 8, v: 5.2 + 3.6 * gk.a.gkr };
     }
   }
   function shotInteractions(px, py) {
@@ -740,7 +742,7 @@ export function simulateMatch(input) {
   function saveAttempt(gk, d, reach) {
     DBG.gk.att++;
     const sh = B.shot, sp = hyp(B.vx, B.vy), stretch = clamp((d - 0.45) / max(0.3, reach - 0.45), 0, 1);
-    let ps = 0.65 + 0.42 * gk.a.gkr + 0.12 * gk.a.gkh - max(0, sp - 22) * 0.02 - stretch * 0.32 - (B.z > 1.9 ? 0.08 : 0) - (sh.header ? 0.25 : 0) + (gk.tags.has("shot-stopper") ? 0.05 : 0);
+    let ps = 0.72 + 0.42 * gk.a.gkr + 0.12 * gk.a.gkh - max(0, sp - 22) * 0.02 - stretch * 0.32 - (B.z > 1.9 ? 0.08 : 0) - (sh.header ? 0.25 : 0) + (gk.tags.has("shot-stopper") ? 0.05 : 0);
     const mir = gk.team.aura && gk.team.aura.trigger === "keeper_miracle" && !gk.team.auraState.used && sh.xg >= 0.25;
     if (mir) { ps += 0.5; }
     if (sh.forced === "goal") ps = -1; else if (sh.forced === "saved") ps = 2;
@@ -748,14 +750,14 @@ export function simulateMatch(input) {
     DBG.gk.saved++;
     if (mir && R() < 0.98) { gk.team.auraState.used = true; ev("aura", { team: gk.team.side, name: gk.team.aura.name, trigger: "keeper_miracle" }); }
     if (!S.shootout) { gk.team.stats.saves++; gk.st.saves++; } rate(gk, 0.28 + (sh.xg > 0.25 ? 0.35 : 0)); addMom(gk.team, 0.08 + (sh.xg > 0.25 ? 0.12 : 0));
-    const catchP = sp < 20 && stretch < 0.45 && !sh.pen ? 0.35 + 0.55 * gk.a.gkh : 0.05;
+    const catchP = !sh.pen ? (sp < 28 && stretch < 0.6 ? 0.55 + 0.42 * gk.a.gkh : stretch < 0.8 ? 0.2 + 0.2 * gk.a.gkh : 0.06) : 0.05;
     if (S.shootout) { B.vx = -B.vx * 0.2; B.vy = rr(-4, 4); B.vz = 0.5; shootResult("saved"); return; }
     if (R() < catchP) { shotOutcome(sh, "caught", gk); giveBall(gk, true); gk.nextDec = S.tick + floor(rr(25, 55)); return; }
     if (B.z > 1.75 && R() < 0.6) { // tipped over
-      B.vz = abs(B.vz) + 3.2; B.vx *= 0.6; B.vy *= 0.6; B.last = gk; B.lastTeam = gk.team; shotOutcome(sh, "tipped", gk); B.shot = null; B.flight++; return; }
+      B.vz = abs(B.vz) * 0.5 + 2.6; B.vx *= 0.35; B.vy *= 0.35; B.last = gk; B.lastTeam = gk.team; shotOutcome(sh, "tipped", gk); B.shot = null; B.flight++; return; }
     const out = dir(gk.team) > 0 ? 1 : -1;   // away from his goal
-    if (R() < 0.42) { B.vx = -out * rr(2, 5); B.vy = (B.y < CY ? -1 : 1) * rr(6, 11); B.vz = rr(0.5, 2.5); }   // pushed round the post
-    else { B.vx = out * rr(3, 9); B.vy = rr(-7, 7); B.vz = rr(0.4, 3); } B.last = gk; B.lastTeam = gk.team; B.flight++; B.tried = {};
+    if (R() < 0.55) { B.vx = -out * rr(1, 3); B.vy = (B.y < CY ? -1 : 1) * rr(3.5, 6.5); B.vz = rr(0.3, 1.6); }   // pushed round the post
+    else { B.vx = out * rr(1.5, 4.5); B.vy = rr(-3.5, 3.5); B.vz = rr(0.2, 1.2); }   // spilled in front of him B.last = gk; B.lastTeam = gk.team; B.flight++; B.tried = {};
     shotOutcome(sh, "parried", gk); B.shot = null;
   }
   function shotOutcome(sh, outcome, gk) {
@@ -876,6 +878,10 @@ export function simulateMatch(input) {
     t.onPitch.splice(t.onPitch.indexOf(p), 1); p.playing = false; p.state = "leaving";
     p.tx = p.x; p.ty = p.y < CY ? -3 : W + 3; p.urg = 0; p.hands = false;
     if (B.owner === p) B.owner = null;
+    if (p.G === "GK" && !gkOf(t)) {   // no keeper left: an outfielder goes in goal
+      const q = [...t.onPitch].sort((a, b) => (b.h + b.a.str) - (a.h + a.a.str) || a.id - b.id)[0];
+      if (q) { q.G = "GK"; q.g = "GK"; q.a.gkr = 0.42; q.a.gkh = 0.4; q.a.gkd = 0.42; q.a.gks = 0.3; q.slot = { ...q.slot, k: q.slot ? q.slot.k : "GK", g: "GK", x: 50, y: 7 }; }
+    }
     addMom(t.opp, 0.3);
   }
 
@@ -954,6 +960,7 @@ export function simulateMatch(input) {
         let e = P * threat(tu, tv) - (1 - P) * lossHere;
         if (k === "takeon") e *= p.tags.has("dribbler") ? 1.3 : 0.9;
         if (du > 0.5) e *= (1 + 0.25 * tac.tempo) * (counterOn ? 1.3 : 1);
+        if (du > 0.5 && pu < 50 && pressure < 0.15 && !block) e += 0.0012;   // step into space when nobody closes you down
         e *= 0.92 + 0.16 * p.a.dri;
         opts.push({ k, ev: e, tx: pt.x, ty: pt.y, P });
       }
@@ -972,14 +979,14 @@ export function simulateMatch(input) {
     const team = p.team, tac = team.tac, opp = team.opp;
     const d0 = hyp(r.x - p.x, r.y - p.y);
     let tx, ty, spd, loft = false, Tf = 0;
-    if (kind === "ground" || kind === "cutback") { spd = clamp(9 + d0 * 0.38, 9, 22); const t = d0 / spd; tx = r.x + r.vx * t * 0.7; ty = r.y + r.vy * t * 0.7; }
+    if (kind === "ground" || kind === "cutback") { spd = clamp(10.5 + d0 * 0.4, 10.5, 24); const t = d0 / spd; tx = r.x + r.vx * t * 0.7; ty = r.y + r.vy * t * 0.7; }
     else if (kind === "loft" || kind === "cross") {
-      loft = true; Tf = kind === "cross" ? 1.05 + d0 / 40 : 0.8 + d0 / 26;
+      loft = true; Tf = kind === "cross" ? 0.95 + d0 / 45 : 0.7 + d0 / 30;
       if (kind === "cross") { const pt = XY(team, clamp(U(team, r.x + r.vx * Tf), L - 13, L - 4), clamp(V(team, r.y + r.vy * Tf), CY - 9, CY + 9)); tx = pt.x; ty = pt.y; }
       else { tx = r.x + r.vx * Tf * 0.8; ty = r.y + r.vy * Tf * 0.8; }
       spd = d0 / Tf;
     }
-    else { const ahead = 6 + 5 * r.a.pac, ru = U(team, r.x); const pt = XY(team, min(ru + ahead, L - 6), V(team, r.y)); tx = pt.x; ty = pt.y + r.vy * 0.6; spd = clamp(10 + d0 * 0.35, 10, 22); }
+    else { const ahead = 6 + 5 * r.a.pac, ru = U(team, r.x); const pt = XY(team, min(ru + ahead, L - 6), V(team, r.y)); tx = pt.x; ty = pt.y + r.vy * 0.6; spd = clamp(11.5 + d0 * 0.38, 11.5, 24); }
     if (tx < 1 || tx > L - 1 || ty < 1 || ty > W - 1) return null;
     if (loft && !(WX.longOK >= 1) && d0 > 35 && R() > WX.longOK) return null;
     const dd = hyp(tx - p.x, ty - p.y);
@@ -1015,6 +1022,10 @@ export function simulateMatch(input) {
     if (prog > 3) e *= 1 + 0.35 * tac.tempo; else if (prog < -3) e *= 1.15 - 0.5 * tac.tempo;
     if (tac.buildUp === "short" && pu < 45 && dd < 22) e += 0.002 * P;
     if (tac.buildUp === "direct" && dd > 30 && prog > 15) e *= 1.45;
+    // teams look to progress rather than recycle forever at the back
+    const stale = S.tick - S.lastPossChange[team.side], pu0 = U(team, p.x);
+    if (pu0 < 55) { if (prog > 4) e += 0.0005 * min(prog, 25) * (stale > 250 ? 1.5 : 1); else if (prog < -2 && stale > 200) e *= 0.75; }
+    if (p.lastPass && p.lastPass.from === r && S.tick - p.lastPass.tick < 80) e *= 0.65;
     if (tac.buildUp === "short" && dd > 35) e *= 0.7;
     if (abs(tv - CY) > 20) e *= 0.85 + 0.3 * tac.width;
     e += 0.0035 * P * (1 - tac.tempo);
