@@ -249,6 +249,9 @@ table.pt .rv.hi{background:var(--ok-soft);color:var(--ok)} table.pt .rv.lo{backg
 table.pt .in{color:var(--ok);font-size:11px} table.pt .out{color:var(--red);font-size:11px}
 .solo{display:grid;gap:10px;border-top:2px dashed var(--rule);padding-top:16px}
 .hero .rules{box-shadow:none;border:2px solid var(--rule)}
+.quick{border:2px dashed var(--rule);border-radius:14px;padding:4px 16px}
+.quick summary{cursor:pointer;font-weight:700;padding:12px 0}
+.quick[open]{padding-bottom:16px}
 /* The wheel */
 .spinpanel{border-top-color:var(--saffron)}
 .wheelbox{position:relative;width:min(100%,300px);aspect-ratio:1;margin:0 auto}
@@ -569,6 +572,35 @@ function wheelPick(st, g){
   const tierOf = WHEEL_ODDS.findIndex(o=>rt>=o.min && rt<=o.max);
   return {tier: tierOf<0?tier:tierOf, player:{name:pick.name, random:true, positions:[pos], nationality:pick.nat, nationalTeam:pick.nat, clubs:pick.club?[pick.club]:[], retired:false, rating:rt,
     attack:G2==="FWD"?rt+2:G2==="MID"?rt-6:G2==="DEF"?rt-30:20, defense:G2==="DEF"?rt+2:G2==="MID"?rt-8:G2==="GK"?rt:rt-40, pace:clamp(rt-6,45,95), fiery:false}};
+}
+/* ---------- quick match: skip the draft to test the match engine ---------- */
+const QUICK_MANAGERS = [{name:"Pep Guardiola",rating:95,style:"possession"},{name:"Jürgen Klopp",rating:93,style:"pressing"},{name:"Carlo Ancelotti",rating:94,style:"pragmatic"},
+  {name:"Diego Simeone",rating:89,style:"counter"},{name:"Antonio Conte",rating:90,style:"direct"},{name:"Mikel Arteta",rating:88,style:"possession"},{name:"José Mourinho",rating:92,style:"counter"},{name:"Xabi Alonso",rating:88,style:"pressing"}];
+const QUICK_STADIUMS = [{name:"Anfield",atmosphere:9,altitudeMeters:0,city:"Liverpool"},{name:"Santiago Bernabéu",atmosphere:8,altitudeMeters:650,city:"Madrid"},{name:"Signal Iduna Park",atmosphere:10,altitudeMeters:0,city:"Dortmund"},
+  {name:"San Siro",atmosphere:9,altitudeMeters:120,city:"Milan"},{name:"Estadio Azteca",atmosphere:9,altitudeMeters:2240,city:"Mexico City"},{name:"Camp Nou",atmosphere:8,altitudeMeters:12,city:"Barcelona"}];
+const QUICK_STRENGTH = {even:{A:[82,90],B:[82,90]}, stronger:{A:[86,95],B:[76,84]}, weaker:{A:[76,84],B:[86,95]}, mixed:{A:[60,99],B:[60,99]}};
+function poolPlayer(pick, pos){
+  const G2=GROUP(pos), rt=pick.rating;
+  return {name:pick.name, quick:true, positions:[pos], nationality:pick.nat, nationalTeam:pick.nat, clubs:pick.club?[pick.club]:[], retired:false, rating:rt,
+    attack:G2==="FWD"?rt+2:G2==="MID"?rt-6:G2==="DEF"?rt-30:20, defense:G2==="DEF"?rt+2:G2==="MID"?rt-8:G2==="GK"?rt:rt-40,
+    pace:clamp(rt+({W:3,ST:0,FB:0,AM:-2,CM:-6,DM:-8,CB:-8,GK:-10}[pos]||0)+Math.round(Math.random()*12-6),45,96), fiery:false};
+}
+function quickSquad(form, band, taken){
+  const sq=emptySquad(form);
+  const pick = g => { for(const gg of NEAR[g]||[g]){ const c=(POOL[gg]||[]).filter(p=>p.rating>=band[0] && p.rating<=band[1] && !taken.has(p.name)); if(c.length){ const p=rand(c); taken.add(p.name); return poolPlayer(p, gg); } }
+    const c=(POOL[g]||[]).filter(p=>!taken.has(p.name)); const p=c.length?rand(c):{name:"Trialist "+Math.floor(Math.random()*90+10),rating:70,nat:"",club:""}; taken.add(p.name); return poolPlayer(p, g); };
+  for(const s of slotsOf(form)) sq.slots[s.k]=pick(s.g);
+  sq.subs=["CB","CM","ST"].map(pick);
+  sq.manager={...rand(QUICK_MANAGERS)}; sq.stadium={...rand(QUICK_STADIUMS)}; sq.aura={none:true};
+  sq.captain=Object.values(sq.slots).sort((a,b)=>b.rating-a.rating)[0].name;
+  return sq;
+}
+function setUpQuick(st, strength, myForm){
+  const band=QUICK_STRENGTH[strength]||QUICK_STRENGTH.even, taken=new Set();
+  st.squads={A:quickSquad(myForm, band.A, taken), B:quickSquad(st.players.B.formation, band.B, taken)};
+  if(st.squads.B.manager.name===st.squads.A.manager.name) st.squads.B.manager={...rand(QUICK_MANAGERS.filter(m=>m.name!==st.squads.A.manager.name))};
+  st.phase="prematch"; st.round=null; st.tac={A:{},B:{}};
+  st.pre={ready:{A:false,B:true}, level:st.pre?.level||"extended", levelBy:null, deadline:Date.now()+PREMATCH_MS, prep:"done"};
 }
 function spinMarker(why, tried){ return {spin:true, why, tried:tried||""}; }
 function buildSpins(st){
@@ -1227,6 +1259,19 @@ async function createSolo(){
   try{ await db.doc("games/"+id).set(st); syncLobby(st); openGame(id); }
   catch(e){ console.warn(e); canWrite=false; render(); }
 }
+async function createQuick(){
+  const team = ($("#team")?.value||"").trim().slice(0,24) || "My XI";
+  const formation = $("#formation")?.value||"4-3-3";
+  const strength = $("#qstrength")?.value||"even", claudeTalk = !!$("#qclaude")?.checked;
+  lsSet("dn_team", team); lsSet("dn_form", formation); lsSet("dn_qstrength", strength);
+  const chars="ABCDEFGHJKMNPQRSTUVWXYZ23456789"; let id=""; for(let i=0;i<5;i++) id+=chars[Math.floor(Math.random()*chars.length)];
+  const st = {id, appV:APP_VERSION, lastV:APP_VERSION, vseq:1, solo:{level:"medium"}, quick:{strength, claude:claudeTalk}, createdAt:Date.now(), updatedAt:Date.now(), seq:1, phase:"lobby", settings:{refTier:"quick"}, refOk:{},
+    players:{A:{uid:me.id, team, formation}, B:{uid:"quick-test", team:"Test XI", formation:rand(Object.keys(FORMATIONS)), bot:true}}, log:[]};
+  setUpQuick(st, strength, formation);
+  pushLog(st, `Quick match: ${team} v Test XI. Random squads from the wheel pool; set your tactics and kick off.`, "A");
+  try{ await db.doc("games/"+id).set(st); syncLobby(st); openGame(id); }
+  catch(e){ console.warn(e); canWrite=false; render(); }
+}
 async function joinGame(id){
   const team = ($("#team")?.value||"").trim().slice(0,24) || "Away XI";
   const formation = $("#formation")?.value||"4-3-3";
@@ -1312,9 +1357,9 @@ async function runMatch(){
     st.squads = fresh.squads;
     st.match = {v:ENGINE_VERSION, seed, tac, level: fresh.pre?.level||"extended", digest: sim.digest,
       final: sim.final, pens: sim.pens?{A:sim.pens.A, B:sim.pens.B}:null, winner: sim.winner, stats: sim.stats,
-      motm: sim.motm!=null ? sim.ents[sim.motm].name : null, rolls: sim.rolls, report:null, reportPending:!!sample, kickoffAt: Date.now()+(sample?20000:8000)};
+      motm: sim.motm!=null ? sim.ents[sim.motm].name : null, rolls: sim.rolls, report:null, reportPending:!!sample && (!fresh.quick || fresh.quick.claude), kickoffAt: Date.now()+(sample && (!fresh.quick || fresh.quick.claude)?20000:(fresh.quick?4000:8000))};
     st.phase="match"; });
-  if(!ok1 || !sample) return;
+  if(!ok1 || !sample || (fresh.quick && !fresh.quick.claude)) return;
   // Claude writes the dossier (short, shown before kick-off) and the commentary (longer, used as the highlights play) at the same time.
   const save = part => commit(st=>{ if(st.phase!=="match" || !st.match || st.match.seed!==seed) return false; st.match.report = {...(st.match.report||{}), ...part}; if(part.lines) st.match.reportPending=false; });
   const dossier = writeDossier(fresh, input, sim).then(d=>{ if(d) return save(d); });
@@ -1326,7 +1371,9 @@ async function rematch(){
     if(st.phase!=="match" && st.phase!=="done") return false;
     const keep={A:st.players.A, B:st.players.B};
     st.history=[...(st.history||[]), {final:st.match?.final, pens:st.match?.pens?{A:st.match.pens.A,B:st.match.pens.B}:null, winner:st.match?.winner}].slice(-10);
-    delete st.match; delete st.pre; delete st.tac; st.usedIds=[]; st.used={}; st.players=keep; st.log=[]; pushLog(st,"Rematch! New draft, new dice.");
+    delete st.match; delete st.tac; st.usedIds=[]; st.used={}; st.players=keep; st.log=[];
+    if(st.quick){ st.players.B.formation=rand(Object.keys(FORMATIONS)); setUpQuick(st, st.quick.strength, st.players.A.formation); pushLog(st,"New quick match: fresh random squads."); return; }
+    delete st.pre; pushLog(st,"Rematch! New draft, new dice.");
     startDraft(st);
   });
   matchOffset=0; PB=null; SIMCACHE=null; if(raf) cancelAnimationFrame(raf); raf=null;
@@ -1392,6 +1439,14 @@ function lobbyHTML(){
       <div class="seg big" role="group" aria-label="Difficulty">${Object.entries(BOT).map(([k,v])=>`<button type="button" data-botlevel="${k}" class="${(uiLevel||lsGet("dn_level")||"medium")===k?"sel":""}"><b>${v.label}</b><span>${esc(v.blurb)}</span></button>`).join("")}</div>
       <div class="btnrow"><button class="btn red" id="createsolo" ${!db||!canWrite?"disabled":""}>Play Claude</button><span class="muted" style="align-self:center;font-size:13px">Same draft, same referee, same match engine. Claude picks in character.</span></div>
     </div>
+    <details class="quick"><summary>Quick match: skip the draft</summary>
+      <p class="muted" style="margin:0 0 10px">Two random squads from the wheel's player pool, straight to the team talk. For testing tactics and the match engine.</p>
+      <div class="formrow">
+        <div class="field"><label for="qstrength">Squads</label><select id="qstrength">${[["even","Evenly matched"],["stronger","Yours much stronger"],["weaker","Theirs much stronger"],["mixed","Completely random"]].map(([k,v])=>`<option value="${k}" ${(lsGet("dn_qstrength")||"even")===k?"selected":""}>${v}</option>`).join("")}</select></div>
+        <label class="tog" style="align-self:end;padding-bottom:10px"><input type="checkbox" id="qclaude"> Claude dossier and commentary</label>
+      </div>
+      <div class="btnrow" style="margin-top:10px"><button class="btn ghost" id="createquick" ${!db||!canWrite?"disabled":""}>Start quick match</button></div>
+    </details>
     <details class="rules"><summary>How it works</summary>
       <ul>
         <li>11 starter rounds, then 3 bench rounds. Picks alternate who goes first, and a ten-sided die changes each round.</li>
@@ -1998,7 +2053,7 @@ function matchHTML(){
    <div class="mombox"><div class="eyebrow">Momentum · <span style="color:${COL.A}">▲ ${esc(A)}</span> · <span style="color:${COL.B}">▼ ${esc(B)}</span></div><svg id="mom" viewBox="0 0 1000 80" preserveAspectRatio="none" role="img" aria-label="Momentum chart">${pb?momentumSVG(pb):""}</svg></div>
    <div class="btnrow" style="margin-top:10px;justify-content:space-between"><div class="btnrow">
      <div class="seg sm" role="group" aria-label="Playback speed">${[1,2,4].map(r=>`<button type="button" data-rate="${r}" class="${pbClock.rate===r?"sel":""}">${r}×</button>`).join("")}</div>
-     <button class="btn ghost sm" id="skip">Skip to full time</button>${mySeat?`<button class="btn gold sm" id="rematch" hidden>Rematch</button>`:""}<button class="btn ghost sm" id="toLobby">Back to lobby</button></div><span class="muted" id="kick" style="font-size:13px"></span></div>
+     <button class="btn ghost sm" id="skip">Skip to full time</button>${mySeat?`<button class="btn gold sm" id="rematch" hidden>${G.quick?"New quick match":"Rematch"}</button>`:""}<button class="btn ghost sm" id="toLobby">Back to lobby</button></div><span class="muted" id="kick" style="font-size:13px"></span></div>
    <section class="dossier ftreport" id="result" hidden></section>
    <div class="matchgrid">
      <div style="display:grid;gap:16px;align-content:start">
@@ -2111,6 +2166,7 @@ function bind(){
   const on=(sel,ev,fn)=>document.querySelectorAll(sel).forEach(el=>el.addEventListener(ev,fn));
   on("#create","click",createGame);
   on("#createsolo","click",createSolo);
+  on("#createquick","click",createQuick);
   on("[data-botlevel]","click",e=>{ uiLevel=e.currentTarget.dataset.botlevel; lsSet("dn_level", uiLevel); document.querySelectorAll("[data-botlevel]").forEach(b=>b.classList.toggle("sel", b.dataset.botlevel===uiLevel)); });
   on("#acode","input",e=>{ lsSet("dn_code", e.currentTarget.value.trim()); accessProblem=false; });
   on("[data-join]","click",e=>joinGame(e.currentTarget.dataset.join));
