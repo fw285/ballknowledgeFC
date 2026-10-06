@@ -354,7 +354,7 @@ const FIREBASE_CONFIG = {
 };
 const API_URL = "/api/claude";
 /* Both devices must run the same version of the game. Bump this whenever the game logic changes. */
-const APP_VERSION = "2026-10-06c";
+const APP_VERSION = "2026-10-06d";
 
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { initializeFirestore, doc as fdoc, getDoc, setDoc, onSnapshot as fsnap, collection as fcol, query as fquery, orderBy as forder, limit as flimit, runTransaction } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -1820,7 +1820,7 @@ function playPos(){
 function setRate(rate){ const pos=playPos(); pbClock={rate, wall:Date.now(), pos}; }
 
 /* ---------- highlights cut ---------- */
-function possStart(R, k, back){ const po=R.PO[k]; let j=k; const lim=Math.max(0,k-back); while(j>lim && R.PO[j-1]===po && R.MD[j-1]===0) j--; return j; }
+function possStart(R, k, back){ const po=R.PO[k]; let j=k; const lim=Math.max(0,k-back); while(j>lim && (R.PO[j-1]===po || R.PO[j-1]===2) && R.MD[j-1]===0) j--; return j; }
 function nextLive(R, k, n){ for(let j=k;j<Math.min(n,k+700);j++) if(R.MD[j]===0) return j; return -1; }
 function buildTimeline(sim, level){
   const R=sim.rec, ft=sim.ftTick, ht=sim.htTick, N=sim.ticks, LV=LEVELS[level]||LEVELS.extended, lv=level==="key"?0:level==="full"?2:1;
@@ -1880,7 +1880,7 @@ function buildPlayback(sim, level){
   const tl=buildTimeline(sim, level), R=sim.rec, N=sim.ticks, E=sim.E;
   // running possession, counting only ticks with the ball in play
   const cumA=new Uint32Array(N), cumP=new Uint32Array(N); let a=0, p=0;
-  for(let k=0;k<N;k++){ if(R.MD[k]===0){ p++; if(R.PO[k]===0) a++; } cumA[k]=a; cumP[k]=p; }
+  for(let k=0;k<N;k++){ if(R.MD[k]===0 && R.PO[k]<2){ p++; if(R.PO[k]===0) a++; } cumA[k]=a; cumP[k]=p; }
   const entered=new Array(E).fill(null), left=new Array(E).fill(null);
   sim.ents.forEach((e,i)=>{ if(!e.bench) entered[i]=0; });
   for(const e of sim.events){ if(e.type==="sub"){ entered[e.p]=e.tick; left[e.out]=e.tick; } if(e.type==="red") left[e.p]=e.tick; }

@@ -13,7 +13,7 @@
    across it. "Team frame" (u, v): u = distance from your own goal
    line, v = across the pitch from your left touchline.
    ============================================================ */
-export const ENGINE_VERSION = "3.0";
+export const ENGINE_VERSION = "3.1";
 export const DT = 0.1;                 // seconds of match time per tick
 const SUBSTEPS = 2, HS = DT / SUBSTEPS;
 export const L = 105, W = 68;
@@ -129,7 +129,7 @@ export function simulateMatch(input) {
       foot: pl.foot || "R", h: clamp(num(pl.heightCm, 181), 160, 205) / 100, golden: !!pl.golden, meme: !!pl.isMeme, ovr: num(pl.rating, 70),
       x: -20, y: -20, vx: 0, vy: 0, fx: 1, fy: 0, on: false, playing: false, state: "bench", energy: 1,
       rating: pl.golden ? 6.7 : 6.35, yellow: 0, tx: 0, ty: 0, urg: 1, think: 0, run: null, runCd: 0, recv: null, stun: 0, tackleCd: 0,
-      nextDec: 0, controlUntil: 0, duelCd: 0, carryStart: 0, firstTime: false, volley: false, restartKick: false, fadeIn: null, fadeLen: 0.5, fadeAt: null, goneAt: null, carry: null, hands: false, dive: null, nu: rr(-1, 1), nv: rr(-1, 1), enteredAt: 0, lastPass: null, lastBeat: -999,
+      nextDec: 0, lag: 0, controlUntil: 0, duelCd: 0, carryStart: 0, firstTime: false, volley: false, restartKick: false, fadeIn: null, fadeLen: 0.5, fadeAt: null, goneAt: null, carry: null, hands: false, dive: null, nu: rr(-1, 1), nv: rr(-1, 1), enteredAt: 0, lastPass: null, lastBeat: -999,
       st: { passes: 0, passOk: 0, shots: 0, onT: 0, goals: 0, assists: 0, tackles: 0, intercepts: 0, dribbles: 0, saves: 0, keyPasses: 0, fouls: 0 }
     };
     p.g0 = g;
@@ -216,10 +216,12 @@ export function simulateMatch(input) {
     const k = S.tick; if (k >= MAXT) return;
     for (let i = 0; i < E; i++) { const p = ents[i]; REC.X[k * E + i] = round(p.x * 10); REC.Y[k * E + i] = round(p.y * 10); REC.F[k * E + i] = (p.on ? 1 : 0) | (p.playing ? 2 : 0) | (p.hands ? 4 : 0) | (p.dive ? 8 : 0); }
     REC.BX[k] = round(B.x * 10); REC.BY[k] = round(B.y * 10); REC.BZ[k] = round(B.z * 10);
-    REC.OW[k] = B.owner ? B.owner.id : -1; REC.PO[k] = S.poss === T.B ? 1 : 0; REC.CL[k] = round(S.clock);
+    REC.OW[k] = B.owner ? B.owner.id : -1; REC.PO[k] = controlled() ? (S.poss === T.B ? 1 : 0) : 2; REC.CL[k] = round(S.clock);
     REC.MD[k] = S.shootout ? 4 : B.mode === "dead" ? 1 : 0;
     if (k % 100 === 0) { MOM.push(round(momentum() * 100)); for (let i = 0; i < E; i++) { RAT[i].push(ents[i].on || ents[i].state === "off" ? round(ents[i].rating * 10) : 0); STA[i].push(ents[i].state === "bench" || ents[i].state === "injured" ? 0 : round(ents[i].energy * 100)); } }
   }
+  // possession only counts while a team has the ball or a pass is on its way to a teammate (not loose balls or clearances)
+  const controlled = () => !!(B.owner || (B.pass && B.pass.to && B.pass.from && B.pass.from.team === B.pass.to.team && B.pass.kind !== "clear"));
   const momentum = () => (T.A.momP - T.B.momP) / (T.A.momP + T.B.momP + 0.8);
 
   /* ---------- line-ups on the pitch ---------- */
@@ -250,7 +252,7 @@ export function simulateMatch(input) {
     const free = !B.owner;
     if (free && !(B.pass && B.pass.to && B.pass.to.team === team)) {
       const pt = landing(); c.chasePt = pt;
-      const behind = B.pass && B.pass.to && B.pass.to.team !== team && (B.pass.kind === "through" || (B.pass.loft && U(team, pt.x) < 30));
+      const behind = B.pass && B.pass.to && B.pass.to.team !== team && (B.pass.kind === "through" || B.pass.kind === "over" || (B.pass.loft && U(team, pt.x) < 30));
       const n = B.pass && B.pass.to && B.pass.to.team !== team ? (behind ? 2 : hyp(B.pass.to.x - pt.x, B.pass.to.y - pt.y) > 4 ? 1 : 0) : 2;
       const ptU = U(team, pt.x);
       const firstOpp = nearestOf(opp.onPitch, pt.x, pt.y);
@@ -335,8 +337,10 @@ export function simulateMatch(input) {
     // rest defence: centre-backs (and holding full-backs/DMs) stay goal-side of the opposition's most advanced forwards
     if (g === "CB" || (g === "FB" && (tac.fullbacks === "conservative" || tac.fullbacks === "inverted")) || (g === "DM" && tac.mentality < 0.6)) {
       let deep = L; for (const o of team.opp.onPitch) { if (o.G === "GK") continue; const ou = U(team, o.x); if (ou < deep) deep = ou; }
-      const cushion = g === "CB" ? 4 + 4 * (1 - tac.line) : 1;
-      u = min(u, deep - cushion, g === "CB" ? 46 + 6 * tac.line : 60);
+      // all-out attack pushes the last line up too, so there's less cover when the ball is lost
+      const allOut = max(0, tac.mentality - 0.6) / 0.4;
+      const cushion = g === "CB" ? max(1.5, 4 + 4 * (1 - tac.line) - 2.5 * allOut) : 1;
+      u = min(u, deep - cushion, g === "CB" ? 46 + 6 * tac.line + 8 * allOut : 60);
     }
     if (c.support.includes(p) && B.owner) {
       const ou = U(team, B.owner.x), ov = V(team, B.owner.y); let du = u - ou, dv = v - ov; const d = hyp(du, dv) || 1, want = clamp(d, 9, 16);
@@ -356,9 +360,11 @@ export function simulateMatch(input) {
       if (g === "ST") { pr = 0.55; ru = L - rr(5, 9); rv = CY + bs * rr(0, 5); }
       else if (g === "W" && (p.slot.x < 50 ? -1 : 1) !== bs) { pr = 0.45; ru = L - rr(4, 8); rv = CY - bs * rr(3, 7); }
       else if (g === "AM" || (g === "CM" && (p.tags.has("box-to-box") || tac.mentality > 0.6))) { pr = 0.3; ru = L - rr(10, 17); rv = CY + rr(-6, 6); }
-    } else if (c.bu > 32 && (p.G === "FWD" || (g === "AM" && tac.mentality > 0.5))) {
+    } else if (c.bu > (L - c.offU > 28 ? 6 : 22) && (p.G === "FWD" || (g === "AM" && tac.mentality > 0.5))) {
       pr = 0.06 + 0.1 * tac.mentality + 0.07 * tac.tempo + (p.tags.has("pressing forward") || p.tags.has("speedster") || p.tags.has("complete forward") ? 0.06 : 0) - (p.tags.has("false nine") || p.tags.has("target man") ? 0.05 : 0);
-      ru = c.offU + rr(6, 14); rv = clamp(v + rr(-7, 7), 4, W - 4); hold = true;
+      // a high line leaves acres behind it: quick forwards keep testing it
+      const space = L - c.offU; pr *= clamp((space - 14) / 12, 0.5, 2.6) * (0.7 + 0.6 * p.a.pac);
+      ru = c.offU + rr(6, 14) + max(0, space - 25) * 0.3; rv = clamp(v + rr(-7, 7), 4, W - 4); hold = true;
     } else if (g === "FB" && (tac.fullbacks === "overlapping" || tac.fullbacks === "wingbacks" || p.tags.has("overlapping full-back") || p.tags.has("wing-back")) && c.bu > 45 && abs(c.bv - (p.slot.x < 50 ? 0 : W)) < 26) {
       pr = 0.13; ru = min(c.bu + 14, L - 12); rv = p.slot.x < 50 ? 3 : W - 3;
     }
@@ -420,7 +426,8 @@ export function simulateMatch(input) {
     const act = ACT, nA = act.length, celebrating = B.mode === "dead" && S.restart && S.restart.celebrate && S.tick < S.restart.celebrate.until;
     for (let ii = 0; ii < nA; ii++) {
       const p = act[ii];
-      let cap = p.vmax * SPD[p.urg] * (0.8 + 0.2 * p.energy), acc = p.acc;
+      let cap = p.vmax * SPD[p.urg] * (0.72 + 0.28 * p.energy), acc = p.acc;
+      if (p.lag > S.tick) { cap *= 0.35; acc *= 0.5; }   // turning to chase a ball played in behind
       if (p.stun > S.tick) cap *= 0.45;
       if (p === B.owner) { cap = min(cap, p.vmax * (0.55 + 0.2 * p.a.dri) * (0.8 + 0.2 * p.energy)); if (pressureOn(p) > 0.3 && S.tick - p.lastBeat > 8) cap *= 0.75; }
       if (p.state === "leaving") cap = 1.6;
@@ -581,12 +588,18 @@ export function simulateMatch(input) {
       for (const team of teams) for (const p of team.onPitch) { if (p === B.kicker && S.tick - B.kickTick < 6) continue; const d = hyp(p.x - B.x, p.y - B.y); if (d < 1.7 && B.tried[p.id] !== B.flight) c.push([d, p]); }
       if (!c.length) return false;
       for (const [, p] of c) B.tried[p.id] = B.flight;
-      if (c.length === 1 && B.pass && B.pass.to === c[0][1] && B.z < 1.7 && !(B.pass.kind === "cross" && B.z > 1.15)) { passEnd("ok"); receive(c[0][1], sp); return true; }
+      // an unchallenged runner brings a long ball down on his chest or thigh and keeps going
+      const longBall = B.pass && (B.pass.kind === "over" || B.pass.kind === "loft" || B.pass.kind === "long");
+      if (c.length === 1 && B.pass && B.pass.to === c[0][1] && (B.z < 1.7 || (longBall && B.z < 2.4)) && !(B.pass.kind === "cross" && B.z > 1.15)) { passEnd("ok"); receive(c[0][1], sp); return true; }
       passEnd("aerial");
       let best = null, bs = -9;
+      const behindBall = B.pass && (B.pass.kind === "over" || B.pass.kind === "through");
       for (const [d, p] of c) {
         const keeper = p.G === "GK" && inOwnBox(p);
-        const s = 0.45 * p.a.hea + 0.6 * (p.h - 1.75) + 0.2 * p.a.str + R() * 0.35 + (B.pass && B.pass.to === p ? 0.1 : 0) + (p.tags.has("aerial threat") ? 0.08 : 0) - d * 0.15 + (keeper ? 0.35 + 0.4 * p.a.gkh : 0);
+        // on a ball played in behind, the runner is attacking it; a defender is turning and chasing back
+        const run = behindBall ? (B.pass.to === p ? 0.35 : p.team !== B.pass.from.team && !keeper ? -0.2 : 0) : 0;
+        const setBlock = !keeper && p.G !== "GK" && inOwnBox(p) ? 0.18 * (1 - p.team.tac.line) : 0;   // a deep block is set and waiting for the cross
+        const s = 0.45 * p.a.hea + 0.6 * (p.h - 1.75) + 0.2 * p.a.str + R() * 0.35 + (B.pass && B.pass.to === p ? 0.1 : 0) + (p.tags.has("aerial threat") ? 0.08 : 0) - d * 0.15 + (keeper ? 0.35 + 0.4 * p.a.gkh : 0) + run + setBlock;
         if (s > bs) { bs = s; best = p; }
       }
       aerialWin(best, c.length > 1);
@@ -596,7 +609,8 @@ export function simulateMatch(input) {
     const c = [];
     for (const team of teams) for (const p of team.onPitch) {
       if (p === B.kicker && S.tick - B.kickTick < 6) continue;
-      const d = segDist(p, px, py), r0 = p.G === "GK" && inOwnBox(p) ? 1.3 : B.lastTeam && p.team !== B.lastTeam ? 0.85 * (0.62 + 0.25 * p.a.tac + 0.25 * p.a.mar) : 0.85;
+      const deepBox = B.lastTeam && p.team !== B.lastTeam && p.G !== "GK" && inOwnBox(p) ? 1 + 0.45 * (1 - p.team.tac.line) : 1;
+      const d = segDist(p, px, py), r0 = p.G === "GK" && inOwnBox(p) ? 1.3 : B.lastTeam && p.team !== B.lastTeam ? 0.85 * (0.62 + 0.25 * p.a.tac + 0.25 * p.a.mar) * deepBox : 0.85;
       if (d < r0) { const tr = B.tried[p.id]; if (tr === B.flight && (B.pass || B.shot)) continue; if (typeof tr === "number" && tr < 0 && S.tick + tr < 4) continue; c.push([d, p]); }
     }
     if (!c.length) return false;
@@ -639,6 +653,8 @@ export function simulateMatch(input) {
   function aerialWin(p, contested) {
     const team = p.team, u = U(team, p.x), v = V(team, p.y), pass = B.pass;
     rate(p, contested ? 0.04 : 0.01);
+    // the runner a long ball was meant for brings it down and goes, rather than heading it on
+    if (pass && pass.to === p && (pass.kind === "over" || pass.kind === "loft" || pass.kind === "long") && B.z < 2.4 && !(u > L - 16 && abs(v - CY) < 12)) { passEnd("ok"); receive(p, hyp(B.vx, B.vy)); return; }
     if (p.G === "GK" && inOwnBox(p)) {
       if (R() < 0.55 + 0.4 * p.a.gkh) { giveBall(p, true); p.nextDec = S.tick + floor(rr(20, 45)); return; }
       const t = XY(team, rr(22, 32), V(team, p.y) + rr(-12, 12)); launch(p, t.x, t.y, { loft: true, T: 1.2 }); B.pass = { from: p, to: null, kind: "punch", tick: S.tick }; return;
@@ -700,7 +716,7 @@ export function simulateMatch(input) {
     if (info.pen) method.push("penalty"); else if (info.freekick) method.push("free kick"); else if (info.header) method.push("header"); else if (info.volley) method.push("volley");
     if (!info.pen && !info.freekick) { if (d > 20) method.push("long range"); else if (d < 6.5) method.push("close range"); }
     const lp = p.lastPass && S.tick - p.lastPass.tick < 50 ? p.lastPass : null;
-    if (lp && !info.pen && !info.freekick) { if (lp.kind === "through") method.push("through ball"); else if (lp.kind === "cross") method.push("cross"); else if (lp.kind === "cutback") method.push("cut-back"); }
+    if (lp && !info.pen && !info.freekick) { if (lp.kind === "through" || lp.kind === "over") method.push("through ball"); else if (lp.kind === "cross") method.push("cross"); else if (lp.kind === "cutback") method.push("cut-back"); }
     if (S.tick - p.lastBeat < 50) method.push("solo run");
     if (S.tick - S.lastShot[team.side] < 50) method.push("rebound");
     if (S.wonAt[team.side] != null && S.wonAt[team.side] < 50 && S.tick - S.lastPossChange[team.side] < 120 && !info.setpiece && !info.pen) method.push("counter");
@@ -733,7 +749,7 @@ export function simulateMatch(input) {
     if (B.z < 1.75 && !sh.pen) for (const o of dt.onPitch) {
       if (o.G === "GK" || sh.tried[o.id]) continue;
       const d = segDist(o, px, py);
-      if (d < 0.65) { sh.tried[o.id] = 1; const inWall = sh.wall && sh.wall.includes(o.id); if (R() < (inWall ? (B.z < 1.85 ? 0.85 : 0) : 0.42 + 0.3 * o.a.mar)) { block(o); return; } }
+      if (d < 0.65 + (inOwnBox(o) ? 0.25 * (1 - dt.tac.line) : 0)) { sh.tried[o.id] = 1; const inWall = sh.wall && sh.wall.includes(o.id); if (R() < (inWall ? (B.z < 1.85 ? 0.85 : 0) : 0.42 + 0.3 * o.a.mar + (inOwnBox(o) ? 0.12 * (1 - dt.tac.line) : 0))) { block(o); return; } }
     }
     const gk = gkOf(dt); if (!gk || sh.tried[gk.id]) return;
     const d = segDist(gk, px, py), reach = (gk.dive ? 1.45 : 0.85) * (0.85 + 0.15 * gk.a.gkr + 0.15 * gk.a.gkd) + (gk.h - 1.85) * 0.5;
@@ -926,7 +942,8 @@ export function simulateMatch(input) {
     const pu = U(team, p.x), pv = V(team, p.y);
     const no = nearestOf(opp.onPitch, p.x, p.y), dOpp = no ? no.d : 99, pressure = clamp((3.2 - dOpp) / 3.2, 0, 1);
     const lossHere = lossCost(pu);
-    const counterOn = tac.counter && S.tick - S.lastPossChange[team.side] < 80 && (S.wonAt[team.side] || 99) < 55;
+    const breakOn = S.tick - S.lastPossChange[team.side] < 80 && (S.wonAt[team.side] || 99) < 55;
+    const counterOn = breakOn && (tac.counter || R() < 0.55);
     const restartOnly = p.restartKick; p.restartKick = false;
     const opts = [];
     const sdx = L - pu, sdy = abs(pv - CY), sd = hyp(sdx, sdy);
@@ -947,6 +964,7 @@ export function simulateMatch(input) {
       if (d < 45) { const o = passOption(p, r, "ground", pressure); if (o) opts.push(o); }
       if (d > 24 && !rGK && (r.G !== "DEF" || abs(rv - CY) > 18)) { const o = passOption(p, r, "loft", pressure); if (o) opts.push(o); }
       if (!restartOnly && r.G !== "DEF" && !rGK && ru > pu - 2 && r.run && r.run.hold && (p.a.vis > 0.62 || p.tags.has("advanced playmaker") || p.tags.has("deep-lying playmaker"))) { const o = passOption(p, r, "through", pressure); if (o) opts.push(o); }
+      if (!restartOnly && r.G !== "DEF" && !rGK && r.run && r.run.hold && d > 14 && L - c.offU > 20 && (p.a.pas > 0.55 || p.G === "DEF")) { const o = passOption(p, r, "over", pressure); if (o) opts.push(o); }
       if (pu > L - 36 && abs(pv - CY) > 11 && ru > L - 24 && abs(rv - CY) < 15) { const o = passOption(p, r, "cross", pressure); if (o) opts.push(o); }
       if (!restartOnly && pu > L - 15 && abs(pv - CY) > 7 && ru > L - 21 && ru < pu - 2 && abs(rv - CY) < 11) { const o = passOption(p, r, "cutback", pressure); if (o) opts.push(o); }
     }
@@ -975,6 +993,9 @@ export function simulateMatch(input) {
       }
       if (pressure > 0.55) opts.push({ k: "hold", ev: 0.5 * threat(pu, pv) * (0.55 + 0.6 * p.a.str) * (p.tags.has("target man") ? 1.3 : 1) });
       if (pu < 24 && pressure > 0.45) opts.push({ k: "clear", ev: 0.004 + 0.012 * pressure });
+      else if (pu < 30 && tac.mentality < 0.3 && pressure > 0.15) opts.push({ k: "clear", ev: 0.004 + 0.01 * pressure + 0.006 * (0.3 - tac.mentality) / 0.3 });
+      // a deep, defensive side doesn't keep the ball at the back for long: after a few seconds it goes long
+      if (tac.mentality < 0.3 && tac.tempo < 0.45 && pu < 50 && S.tick - S.lastPossChange[team.side] > 50 + 120 * tac.mentality) opts.push({ k: "clear", hoof: true, ev: 0.004 + 0.02 * (0.3 - tac.mentality) / 0.3 });
     }
     if (!opts.length) { p.nextDec = S.tick + 3; return; }
     opts.sort((a, b) => b.ev - a.ev);
@@ -995,6 +1016,12 @@ export function simulateMatch(input) {
       else { tx = r.x + r.vx * Tf * 0.8; ty = r.y + r.vy * Tf * 0.8; }
       spd = d0 / Tf;
     }
+    else if (kind === "over") {   // lofted ball over the top into the space behind the line
+      const space = L - team.ctx.offU, ahead = clamp(4 + 0.35 * space, 6, 16) + 3 * r.a.pac, ru = U(team, r.x);
+      const pt = XY(team, min(ru + ahead, L - 7), V(team, r.y)); tx = pt.x; ty = pt.y + r.vy * 0.4;
+      // a higher, dropping arc: over the heads of the line, down into the space behind it
+      loft = true; Tf = 1.05 + hyp(tx - p.x, ty - p.y) / 28; spd = hyp(tx - p.x, ty - p.y) / Tf;
+    }
     else { const ahead = 6 + 5 * r.a.pac, ru = U(team, r.x); const pt = XY(team, min(ru + ahead, L - 6), V(team, r.y)); tx = pt.x; ty = pt.y + r.vy * 0.6; spd = clamp(11.5 + d0 * 0.38, 11.5, 24); }
     if (tx < 1 || tx > L - 1 || ty < 1 || ty > W - 1) return null;
     if (loft && !(WX.longOK >= 1) && d0 > 35 && R() > WX.longOK) return null;
@@ -1003,7 +1030,9 @@ export function simulateMatch(input) {
     const sx = tx - p.x, sy = ty - p.y, L2 = sx * sx + sy * sy || 1;
     for (const o of opp.onPitch) {
       if (loft) {
-        const tO = max(0, hyp(o.x - tx, o.y - ty) - 1.2) / (o.vmax * 0.85), tR = max(0, hyp(r.x - tx, r.y - ty) - 1.2) / (r.vmax * 0.85);
+        // defenders who have to turn and chase a ball dropping behind them lose a moment
+        const turn = kind === "over" && U(team, o.x) < U(team, tx) - 2 && o.G !== "GK" ? 0.45 : 0;
+        const tO = max(0, hyp(o.x - tx, o.y - ty) - 1.2) / (o.vmax * 0.85) + turn, tR = max(0, hyp(r.x - tx, r.y - ty) - 1.2) / (r.vmax * 0.85);
         if (tO < Tf + 0.35) risk += (tO <= tR ? 0.45 : 0.2 * (1 - (tO - tR) / 1.5 > 0 ? 1 - (tO - tR) / 1.5 : 0)) * (0.6 + 0.6 * o.a.hea) * (o.G === "GK" && kind === "cross" ? 1.4 : 1);
         continue;
       }
@@ -1015,7 +1044,8 @@ export function simulateMatch(input) {
     }
     if (kind === "cross") risk += 0.25 * (1 - p.a.cro);
     if (kind === "loft") { risk += 0.12 + 0.004 * d0; const reach = r.vmax * 0.85 * Tf + 1.5; if (hyp(r.x - tx, r.y - ty) > reach) return null; }
-    const skill = kind === "cross" ? p.a.cro : p.a.pas;
+    if (kind === "over") { risk += 0.1 + 0.003 * d0; const reach = r.vmax * 0.9 * Tf + 2; if (hyp(r.x - tx, r.y - ty) > reach) return null; }
+    const skill = kind === "cross" ? p.a.cro : kind === "over" ? 0.6 * p.a.pas + 0.4 * p.a.vis : p.a.pas;
     let P = (1 - min(risk, 0.97)) * (1 - dd * 0.005 * (1.25 - skill) * (loft ? 1.6 : 1)) * (1 - pressure * 0.12 * (1 - p.a.com));
     const ro = nearestOf(opp.onPitch, tx, ty), rPress = ro ? clamp((2.5 - ro.d) / 2.5, 0, 1) : 0;
     P *= 1 - 0.25 * rPress;
@@ -1026,6 +1056,12 @@ export function simulateMatch(input) {
     if (kind === "cross") val = xgAt(L - tu, abs(tv - CY)) * (0.55 + 0.6 * r.a.hea + (r.h - 1.8) * 0.8 + (r.tags.has("aerial threat") || r.tags.has("target man") ? 0.15 : 0)) + threat(tu, tv) * 0.25;
     if (kind === "cutback") val *= 1.2;
     if (kind === "through") val *= 1.1;
+    // played clean through: nobody but the keeper between the receiver and goal is worth a lot more than the spot suggests
+    if (kind === "through" || kind === "over") {
+      let between = 0; for (const o of opp.onPitch) if (o.G !== "GK" && U(team, o.x) > tu - 1) between++;
+      if (between === 0) val += 0.06 + 0.12 * clamp((tu - 45) / 45, 0, 1);
+      else if (between === 1) val += 0.03 * clamp((tu - 45) / 45, 0, 1);
+    }
     const prog = tu - pu;
     let e = P * val - (1 - P) * (lossCost(tu) * 0.8 + lossCost(pu) * 0.2);
     if (prog > 3) e *= 1 + 0.35 * tac.tempo; else if (prog < -3) e *= 1.15 - 0.5 * tac.tempo;
@@ -1036,9 +1072,12 @@ export function simulateMatch(input) {
     if (pu0 < 55) { if (prog > 4) e += 0.0005 * min(prog, 25) * (stale > 250 ? 1.5 : 1); else if (prog < -2 && stale > 200) e *= 0.75; }
     if (p.lastPass && p.lastPass.from === r && S.tick - p.lastPass.tick < 80) e *= 0.65;
     if (tac.buildUp === "short" && dd > 35) e *= 0.7;
+    if (prog > 8 && S.tick - S.lastPossChange[team.side] < 60 && (S.wonAt[team.side] || 99) < 60) e += (tac.counter ? 0.006 : 0.0025) * min(1, prog / 25);
+    const sit = clamp((0.4 - tac.mentality) / 0.4, 0, 1) * clamp((0.45 - tac.tempo) / 0.45 + 0.5, 0.5, 1.5);
+    if (sit > 0 && pu < 55) { if ((loft || kind === "over") && prog > 18) e += 0.005 * sit; else if (prog < 6) e -= 0.0015 * sit; }
     if (abs(tv - CY) > 20) e *= 0.85 + 0.3 * tac.width;
     e += 0.0035 * P * (1 - tac.tempo);
-    if (p.tags.has("deep-lying playmaker") || p.tags.has("advanced playmaker")) { if (kind === "through" || (kind === "loft" && prog > 15)) e *= 1.2; }
+    if (p.tags.has("deep-lying playmaker") || p.tags.has("advanced playmaker")) { if (kind === "through" || kind === "over" || (kind === "loft" && prog > 15)) e *= 1.2; }
     if (kind === "cross") e *= (0.8 + 0.5 * p.a.cro) * (p.slot && (p.slot.g === "W" || p.slot.g === "FB") ? 1.25 : 1) * (0.85 + 0.3 * tac.width);
     return { k: "pass", kind, r, tx, ty, spd, loft, Tf, P, ev: e, prog };
   }
@@ -1059,7 +1098,7 @@ export function simulateMatch(input) {
     if (o.k === "carry" || o.k === "takeon") { p.carry = { x: o.tx, y: o.ty, until: S.tick + floor(rr(6, 12)), takeOn: o.k === "takeon" }; p.carryStart = S.tick; p.nextDec = S.tick + (o.k === "takeon" ? 6 : 7); return; }
     if (o.k === "hold") { p.carry = { x: p.x, y: p.y, until: S.tick + 5, hold: true }; p.nextDec = S.tick + 5; return; }
     if (o.k === "clear") {
-      const toTouch = R() < 0.4, pv = V(team, p.y);
+      const toTouch = !o.hoof && R() < 0.4, pv = V(team, p.y);
       const t = toTouch ? XY(team, min(U(team, p.x) + rr(15, 35), L - 12), pv < CY ? -6 : W + 6) : XY(team, min(U(team, p.x) + rr(38, 52), L - 12), clamp(pv + rr(-16, 16), 5, W - 5));
       launch(p, t.x + gauss() * 3, t.y + gauss() * 3, { loft: true, T: toTouch ? 1.4 : 2.0 }); B.pass = { from: p, to: null, kind: "clear", tick: S.tick, loft: true }; rate(p, 0.01); return;
     }
@@ -1068,17 +1107,24 @@ export function simulateMatch(input) {
     const skill = o.kind === "cross" ? p.a.cro : p.a.pas;
     let err = (1.25 - skill) * (1 + pressure * 0.7) * (1 + 0.5 * (1 - p.energy)) * WX.err * (o.loft ? WX.wind : 1) * (1 - 0.05 * team.momEff) * (1 - homeComp(team)) * (1 + team.minusComp);
     if (team.links.has(p.slot && o.r.slot ? p.slot.k + "|" + o.r.slot.k : "")) err *= 0.85;
-    const kErr = o.kind === "through" ? 2.1 : o.loft ? 1.5 : 1;
+    const kErr = o.kind === "through" ? 2.1 : o.kind === "over" ? 1.9 : o.loft ? 1.5 : 1;
     const lat = gauss() * d * 0.045 * err * kErr, lng = gauss() * d * 0.05 * err * kErr, ux = (o.tx - p.x) / (d || 1), uy = (o.ty - p.y) / (d || 1);
     const tx = clamp(o.tx + ux * lng - uy * lat, -1, L + 1), ty = clamp(o.ty + uy * lng + ux * lat, -1, W + 1);
     const t = o.loft ? launch(p, tx, ty, { loft: true, T: o.Tf }) : launch(p, tx, ty, {});
     const c = team.ctx, ru = U(team, o.r.x);
-    const offside = ru > max(c.offU - (team.ctx.own ? 0 : 0), U(team, p.x)) + 0.3 && ru > L / 2 && o.kind !== "cutback" ? true : (o.kind === "through" && R() < 0.05 * (1.3 - o.r.a.com));
+    const offside = ru > max(c.offU - (team.ctx.own ? 0 : 0), U(team, p.x)) + 0.3 && ru > L / 2 && o.kind !== "cutback" ? true : ((o.kind === "through" || o.kind === "over") && R() < 0.05 * (1.3 - o.r.a.com));
     B.pass = { from: p, to: o.r, kind: o.kind, tick: S.tick, loft: o.loft, offside };
     DEBUG && chain(`${team.side} ${o.kind} ${p.name.split("-")[0]}@${round(U(team, p.x))}->${o.r.name.split("-")[0]}@${round(U(team, tx))},${round(V(team, ty))} P${round(o.P * 100)}`);
     const dk = DBG.pass[o.kind] || (DBG.pass[o.kind] = { n: 0, ok: 0, P: 0 }); dk.n++; dk.P += o.P;
     o.r.recv = { x: tx, y: ty, until: S.tick + round(t / DT) + 8 };
     if (o.r.run) o.r.run = null;
+    // play through the press and the players who pressed are turned the wrong way, out of the game for a moment
+    for (const q of team.opp.ctx.pressers || []) { if (U(team, q.x) > U(team, p.x) - 1 && U(team, tx) > U(team, q.x) + 3) q.lag = max(q.lag, S.tick + 7); }
+    // a ball in behind catches defenders facing the wrong way: the runner already knew it was coming
+    if (o.kind === "over" || o.kind === "through") for (const q of team.opp.onPitch) {
+      if (q.G === "GK") continue; const qu = U(team, q.x);
+      if (qu > ru - 6 && qu < U(team, tx) + 2) q.lag = S.tick + round(4 + 4 * (1 - 0.5 * q.a.mar - 0.5 * q.a.pac));
+    }
     team.stats.passes++; p.st.passes++;
     if (p.slot && (p.slot.g === "CM" || p.slot.g === "AM") && R() < 0.3 * team.tac.tempo) { const pt = XY(team, U(team, p.x) + 7, V(team, p.y)); p.run = { u: U(team, pt.x), v: V(team, pt.y), hold: false, until: S.tick + 15 }; }
   }
@@ -1319,7 +1365,7 @@ export function simulateMatch(input) {
     if (B.owner && B.mode === "play") duelStep(B.owner);
     // bookkeeping
     if (B.mode === "play" && S.poss) {
-      S.poss.stats.possTicks++;
+      if (controlled()) S.poss.stats.possTicks++;
       const u = U(S.poss, B.x);
       if (u > L * 0.66) addMom(S.poss, 0.0025);
       if (u > L - BOX_D && abs(V(S.poss, B.y) - CY) < BOX_H) addMom(S.poss, 0.006);
