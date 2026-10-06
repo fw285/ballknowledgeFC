@@ -309,6 +309,8 @@ svg.shape{display:block;width:100%;height:auto;border-radius:10px}
 .rrow .rv{font-family:var(--dot);font-size:13px;background:var(--paper-2);border-radius:5px;text-align:center;padding:1px 0}
 .rrow .rv.hi{background:var(--ok-soft);color:var(--ok)} .rrow .rv.lo{background:var(--red-soft);color:var(--red)}
 .rrow .rn{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600}
+.rrow .sta{display:block;height:3px;background:var(--rule);border-radius:2px;margin-top:2px;max-width:120px}
+.rrow .sta b{display:block;height:100%;border-radius:2px}
 .rrow .ri{font-size:12px;white-space:nowrap}
 .statt.ls td{padding:5px 4px}
 .statt.ls td:first-child,.statt.ls td:last-child{width:18%}
@@ -346,6 +348,8 @@ const FIREBASE_CONFIG = {
   measurementId: "G-8C95S137BZ"
 };
 const API_URL = "/api/claude";
+/* Both devices must run the same version of the game. Bump this whenever the game logic changes. */
+const APP_VERSION = "2026-10-06";
 
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { initializeFirestore, doc as fdoc, getDoc, setDoc, onSnapshot as fsnap, collection as fcol, query as fquery, orderBy as forder, limit as flimit, runTransaction } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -465,7 +469,7 @@ const PICK_MS = 60000, SPEED_MS = 30000, REVIEW_MS = 30000, PREMATCH_MS = 900000
 const STAGES = [...Array(11).fill("starter"),"sub","sub","sub","spin","manager","stadium","aura","captain"];
 const SPIN_MS = 7000, SPIN_TURN = 4300;
 const GROUP = g => g==="GK"?"GK":(g==="CB"||g==="FB")?"DEF":(g==="DM"||g==="CM"||g==="AM")?"MID":"FWD";
-const RATING_SCALE = "Prime rating scale: 97-99 all-time great at his peak (prime Messi, prime Cristiano Ronaldo), 92-96 Ballon d'Or contender, 88-91 world-class, 84-87 very good starter at a big club, 78-83 solid top-five-league starter, 70-77 squad player or weaker top flight, below 70 lower level. attack/defense/pace use the same 40-99 scale for that skill (a centre-back's attack is low, a striker's defense is low).";
+const RATING_SCALE = "rating = his best-ever FIFA / EA Sports FC base-card overall (the highest standard card across all editions; no TOTY, TOTS, icon or other special cards). For players from before the FIFA games, give what his peak base card would have been on the same scale. Be strict and consistent: a good-not-great Premier League winger is around 80-83, a world-class player 88-91, only all-time greats 94+. attack, defense and pace use the same 1-99 scale for that skill (a centre-back's attack is low, a striker's defense is low).";
 
 /* ============================================================
    Helpers
@@ -496,7 +500,7 @@ function commit(mut){
   const job = writeChain.then(async ()=>{
     if(!gameRef) return false;
     let prevPhase=null;
-    const wrapped = st => { prevPhase = st.phase; if(mut(st)===false) return false; st.seq=(st.seq||0)+1; st.updatedAt=Date.now(); };
+    const wrapped = st => { prevPhase = st.phase; if(st.appV && st.appV!==APP_VERSION) return false; if(mut(st)===false) return false; st.seq=(st.seq||0)+1; st.updatedAt=Date.now(); st.lastV=APP_VERSION; st.vseq=st.seq; };
     let after;
     try { after = await gameRef.update(wrapped); }
     catch(e){ if(e && (e.code==="invalid_argument"||e.code==="permission-denied")){ canWrite=false; render(); } console.warn(e); return false; }
@@ -684,6 +688,21 @@ function chooseJudge(st, prefer, exclude){
 }
 const PERMANENT = new Set(["unavailable","not_granted","sampling_disabled","not_declared","capability_disabled","capability_removed"]);
 
+/* A pick that times out or is given up: the slot goes to the wheel (players) or gets the booby prize (manager, stadium, aura). */
+function forfeit(st, slotPref, why){
+  const r=st.round, turn=r.turns[r.ti], p=turn.p, sq=st.squads[p], team=st.players[p].team;
+  const lead = why==="timeout" ? "Time's up!" : `${team} give up.`;
+  if(r.kind==="starter"){
+    const open=openStarterSlots(sq), slot = (slotPref && open.some(s=>s.k===slotPref)) ? slotPref : turn.slot || rand(open).k;
+    sq.slots[slot]=spinMarker(why); pushLog(st, `${lead} ${team}'s ${slot} slot goes to the wheel.`, p);
+  } else if(r.kind==="sub"){ sq.subs[sq.subs.indexOf(null)]=spinMarker(why); pushLog(st,`${lead} ${team}'s bench spot goes to the wheel.`,p); }
+  else if(r.kind==="manager"){ sq.manager={name:rand(MEME_MANAGERS), rating:55, style:"pragmatic", clubs:[], isMeme:true}; pushLog(st,`${lead} ${team} are stuck with ${sq.manager.name}.`,p); }
+  else if(r.kind==="stadium"){ sq.stadium={...MEME_STADIUM, isMeme:true}; pushLog(st,`${lead} ${team} play at a half-empty training ground.`,p); }
+  else if(r.kind==="aura"){ sq.aura={none:true}; pushLog(st,`${lead} ${team} get no aura.`,p); }
+  else if(r.kind==="captain"){ const xi=Object.values(sq.slots).filter(v=>v&&v.name&&!v.isMeme); sq.captain = xi.length?rand(xi).name:null; pushLog(st,`${lead} ${sq.captain||"Nobody"} gets the armband for ${team}.`,p); }
+  advanceTurn(st);
+}
+
 /* Mutators */
 const M = {
   beginJudging(key, seat, name, slot){ return st=>{
@@ -730,16 +749,11 @@ const M = {
   };},
   timeout(key){ return st=>{
     const r=st.round; if(!r||r.key!==key||r.step!=="pick"||Date.now()<r.deadline) return false;
-    const turn=r.turns[r.ti], p=turn.p, sq=st.squads[p], team=st.players[p].team;
-    if(r.kind==="starter"){
-      const slot = turn.slot || rand(openStarterSlots(sq)).k; const g=slotInfo(sq,slot).g;
-      sq.slots[slot]=spinMarker("timeout"); void g; pushLog(st, `Time's up! ${team}'s ${slot} slot goes to the wheel.`, p);
-    } else if(r.kind==="sub"){ sq.subs[sq.subs.indexOf(null)]=spinMarker("timeout"); pushLog(st,`Time's up! ${team}'s bench spot goes to the wheel.`,p); }
-    else if(r.kind==="manager"){ sq.manager={name:rand(MEME_MANAGERS), rating:55, style:"pragmatic", clubs:[], isMeme:true}; pushLog(st,`Time's up! ${team} are stuck with ${sq.manager.name}.`,p); }
-    else if(r.kind==="stadium"){ sq.stadium={...MEME_STADIUM, isMeme:true}; pushLog(st,`Time's up! ${team} play at a half-empty training ground.`,p); }
-    else if(r.kind==="aura"){ sq.aura={none:true}; pushLog(st,`Time's up! ${team} get no aura.`,p); }
-    else if(r.kind==="captain"){ const xi=Object.values(sq.slots).filter(v=>v&&v.name&&!v.isMeme); sq.captain = xi.length?rand(xi).name:null; pushLog(st,`Time's up! ${sq.captain||"Nobody"} gets the armband for ${team}.`,p); }
-    advanceTurn(st);
+    forfeit(st, null, "timeout");
+  };},
+  giveUp(key, seat, slot){ return st=>{
+    const r=st.round; if(!r||r.key!==key||r.step!=="pick"||r.turns[r.ti].p!==seat||r.kind==="captain") return false;
+    forfeit(st, slot, "gaveup");
   };},
   reroll(key, seat){ return st=>{
     const r=st.round; if(!r||r.key!==key||r.step!=="pick") return false;
@@ -816,7 +830,7 @@ Rules:
 - duplicate: true if the pick is the same person or thing as anything in the drafted list.
 - ${RATING_SCALE}
 - clubs: up to 8 main senior clubs, short common names. fiery: true if known for cards or temper.
-${bank==="player"?`- attrs: his PRIME attributes on the same 1-99 scale, like a careful FIFA/Football Manager scout: pac pace, dri dribbling, pas passing, vis vision, cro crossing, fin finishing, lon long shots, hea heading/aerial, tac tackling, mar marking/positioning, str strength, sta stamina, agg aggression, com composure. Goalkeepers also get gkr reflexes, gkh handling, gkd diving/reach, gks sweeping and distribution. Be specific to the real player: they drive how he plays in the match simulation.
+${bank==="player"?`- attrs: the detailed stats from that same best FIFA / EA FC base card, 1-99: pac pace, dri dribbling, pas passing, vis vision, cro crossing, fin finishing, lon long shots, hea heading/aerial, tac tackling, mar marking/positioning, str strength, sta stamina, agg aggression, com composure. Goalkeepers also get gkr reflexes, gkh handling, gkd diving/reach, gks sweeping and distribution. Use the real card numbers as closely as you can (stamina especially: it decides when he tires and gets subbed). They drive how he plays in the match simulation.
 - tags: 1-3 playstyles that genuinely describe him, chosen only from: ${PLAYSTYLES.join(", ")}.
 - foot: R, L or B (two-footed). heightCm: his height. positions: from GK, CB, LB, RB, LWB, RWB, DM, CM, AM, LW, RW, ST.`:""}${bank==="manager"?`- style and tactics: how his teams typically play at his peak. tactics are 1-10: press (pressing intensity), line (defensive line height), width, tempo, mentality (attacking intent). fullbacks: inverted (tuck into midfield, Guardiola/Arteta), overlapping, wingbacks (very high and wide, Conte/Klopp) or conservative (stay home). counter: true if his teams break fast after winning the ball.`:""}
 Your final reply must be only this JSON:
@@ -881,7 +895,7 @@ async function backfillSquads(st){
   const prompt = `You are scouting for a football draft game. Players appear at their PRIME. ${RATING_SCALE}
 ${need.length?`PLAYERS: ${need.map((n,i)=>`${i}. ${n.name} (${n.role})`).join("; ")}`:"PLAYERS: none"}
 ${mgrs.length?`MANAGERS: ${mgrs.map((m,i)=>`${i}. ${m.name}`).join("; ")}`:"MANAGERS: none"}
-For each player give prime attributes (1-99): pac pace, dri dribbling, pas passing, vis vision, cro crossing, fin finishing, lon long shots, hea heading, tac tackling, mar marking, str strength, sta stamina, agg aggression, com composure; goalkeepers also gkr reflexes, gkh handling, gkd diving, gks sweeping/distribution. tags: 1-3 from: ${PLAYSTYLES.join(", ")}. positions from GK, CB, LB, RB, LWB, RWB, DM, CM, AM, LW, RW, ST.
+For each player give the detailed stats from his best FIFA / EA FC base card (1-99): pac pace, dri dribbling, pas passing, vis vision, cro crossing, fin finishing, lon long shots, hea heading, tac tackling, mar marking, str strength, sta stamina, agg aggression, com composure; goalkeepers also gkr reflexes, gkh handling, gkd diving, gks sweeping/distribution. tags: 1-3 from: ${PLAYSTYLES.join(", ")}. positions from GK, CB, LB, RB, LWB, RWB, DM, CM, AM, LW, RW, ST.
 For each manager: style (possession|pressing|counter|pragmatic|direct) and tactics 1-10 (press, line, width, tempo, mentality), buildUp short|mixed|direct, fullbacks inverted|overlapping|wingbacks|conservative, counter true/false.
 Reply with only JSON:
 {"players":[{"i":0,"canonicalName":"Full Name","rating":85,"attack":70,"defense":60,"pace":75,"nationalTeam":"Country","clubs":["Club A"],"retired":false,"fiery":false,"positions":["CM"],"foot":"R","heightCm":180,"attrs":{"pac":75,"dri":80,"pas":85,"vis":84,"cro":70,"fin":68,"lon":74,"hea":55,"tac":66,"mar":64,"str":62,"sta":86,"agg":60,"com":85},"tags":["box-to-box"]}],"managers":[{"i":0,"style":"possession","tactics":{"press":8,"line":8,"width":7,"tempo":5,"mentality":7,"buildUp":"short","fullbacks":"inverted","counter":false},"trademark":"his signature idea in under 10 words"}]}`;
@@ -993,7 +1007,7 @@ function templLine(e, sim){
     case "kickoff": return "We're under way.";
     case "ht": return `Half-time: ${tn("A")} ${e.score.A}–${e.score.B} ${tn("B")}.`;
     case "ft": return `Full-time: ${tn("A")} ${e.score.A}–${e.score.B} ${tn("B")}.`;
-    case "sub": return `${n(e.p)} comes on for ${n(e.out)}.${e.tactical?" An attacking change.":""}`;
+    case "sub": return `${n(e.p)} comes on for ${n(e.out)}${e.why==="tired"?", who's out on his feet":e.why==="poor"?" after a poor game":e.why==="booked"?", who's on a yellow":""}.${e.tactical?" An attacking change.":""}`;
     case "yellow": return e.second ? `Second yellow for ${n(e.p)}.` : `Yellow card for ${n(e.p)}.`;
     case "red": return e.second ? `${n(e.p)} picks up a second yellow and he's off!` : `Straight red! ${n(e.p)} is sent off.`;
     case "penalty": return `Penalty! ${n(e.victim)} is brought down by ${n(e.p)}.`;
@@ -1106,7 +1120,7 @@ async function createGame(){
   const refTier = $("#reftier")?.value||"quick";
   lsSet("dn_team", team); lsSet("dn_form", formation);
   const chars="ABCDEFGHJKMNPQRSTUVWXYZ23456789"; let id=""; for(let i=0;i<5;i++) id+=chars[Math.floor(Math.random()*chars.length)];
-  const st = {id, createdAt:Date.now(), updatedAt:Date.now(), seq:1, phase:"lobby", settings:{refTier}, refOk:{}, players:{A:{uid:me.id, team, formation}, B:null}, log:[]};
+  const st = {id, appV:APP_VERSION, lastV:APP_VERSION, vseq:1, createdAt:Date.now(), updatedAt:Date.now(), seq:1, phase:"lobby", settings:{refTier}, refOk:{}, players:{A:{uid:me.id, team, formation}, B:null}, log:[]};
   pushLog(st, `${team} created the game. Waiting for an opponent.`, "A");
   try{ await db.doc("games/"+id).set(st); syncLobby(st); openGame(id); }
   catch(e){ console.warn(e); canWrite=false; render(); }
@@ -1215,15 +1229,27 @@ async function rematch(){
 function captureInputs(){ const o={}; document.querySelectorAll("#view input[id], #view select[id]").forEach(el=>o[el.id]=el.value); const a=document.activeElement; return {o, focus: a&&a.id?a.id:null, sel: a&&a.selectionStart!=null?[a.selectionStart,a.selectionEnd]:null}; }
 function restoreInputs(c){ for(const id in c.o){ const el=document.getElementById(id); if(el && el.type!=="hidden") el.value=c.o[id]; } if(c.focus){ const el=document.getElementById(c.focus); if(el){ el.focus(); if(c.sel&&el.setSelectionRange) try{el.setSelectionRange(c.sel[0],c.sel[1]);}catch(e){} } } }
 
+// Is the other device on a different version of the page? (Old pages don't stamp their writes.)
+function versionProblem(){
+  if(!G) return "";
+  if(G.appV !== APP_VERSION) return "mine";
+  if(G.vseq != null && G.seq !== G.vseq) return "theirs";
+  return "";
+}
+function versionBanner(){
+  const v=versionProblem(); if(!v) return "";
+  return `<div class="notice bad" style="margin-bottom:14px"><b>${v==="mine"?"This game was started on a different version of Draft Night FC.":"Your opponent's device is running a different version of the game."}</b>
+    Both of you need to open the same link (the same Vercel address), then refresh. ${v==="mine"?"Start a new game from the lobby on this link.":"Mixing versions breaks the draft and the team talk."}</div>`;
+}
 function render(){
   const who=$("#who");
   if(who) who.innerHTML = G ? `<span class="pill">Game <b class="num">&nbsp;${esc(G.id)}</b></span>${mySeat?`<span class="pill ${mySeat.toLowerCase()}">You: ${esc(G.players[mySeat]?.team)}</span>`:`<span class="pill">Watching</span>`}<button class="btn ghost sm" id="leave">Lobby</button>` : "";
   const c = captureInputs();
   const v=$("#view");
   if(!G) v.innerHTML = lobbyHTML();
-  else if(G.phase==="lobby") v.innerHTML = waitingHTML();
-  else if(G.phase==="draft") v.innerHTML = draftHTML();
-  else if(G.phase==="prematch"||G.phase==="report") v.innerHTML = prematchHTML();
+  else if(G.phase==="lobby") v.innerHTML = versionBanner() + waitingHTML();
+  else if(G.phase==="draft") v.innerHTML = versionBanner() + draftHTML();
+  else if(G.phase==="prematch"||G.phase==="report") v.innerHTML = versionBanner() + prematchHTML();
   else if(G.phase==="match"||G.phase==="done") v.innerHTML = matchHTML();
   restoreInputs(c);
   if(G && G.round) rolledKey = G.round.stage+":"+G.seq0;
@@ -1328,7 +1354,7 @@ function teamHTML(p, big){
     const v=sq.slots[s.k], P=pos(s);
     const style=`left:${P.left};top:${P.top}`;
     if(v===null) return `<div class="sticker open ${selecting?"pickable":""} ${selecting&&uiSel.slot===s.k?"sel":""}" ${selecting?`data-slot="${s.k}" role="button" tabindex="0"`:""} style="${style}"><span class="pos">${s.k}</span><span class="nm" style="font-size:12px">${selecting&&uiSel.slot===s.k?"Selected":"Open"}</span></div>`;
-    if(v.empty || v.spin || (v.spunAt && Date.now()<v.spunAt)) return `<div class="sticker wheelslot" style="${style}" title="${esc(v.tried||"")}"><span class="pos">${s.k}</span><span class="nm" style="font-size:15px">🎰</span><span class="nat">${v.spunAt?"spinning…":v.why==="timeout"?"timed out":esc(v.tried?"✕ "+v.tried:"to the wheel")}</span></div>`;
+    if(v.empty || v.spin || (v.spunAt && Date.now()<v.spunAt)) return `<div class="sticker wheelslot" style="${style}" title="${esc(v.tried||"")}"><span class="pos">${s.k}</span><span class="nm" style="font-size:15px">🎰</span><span class="nat">${v.spunAt?"spinning…":v.why==="timeout"?"timed out":v.why==="gaveup"?"gave up":esc(v.tried?"✕ "+v.tried:"to the wheel")}</span></div>`;
     return `<div class="sticker ${v.golden?"gold":""} ${v.isMeme?"meme":""} ${v.random?"wheel":""} ${sq.captain===v.name?"cap":""}" style="${style}" title="${esc(v.name)}">${v.noAI&&!v.random?"":`<span class="rt">${esc(v.rating||"")}</span>`}<span class="pos">${s.k}</span><span class="nm">${esc(surname(v.name))}</span><span class="nat">${v.random?`<span class="tagm">WHEEL</span>`:v.isMeme?`<span class="tagm">FILLER</span>`:esc(v.nationalTeam||v.nationality||"")}</span></div>`;
   }).join("");
   const bench = sq.subs.map((v,i)=> v===null?`<div class="sticker open"><span class="pos">SUB ${i+1}</span><span class="nm" style="font-size:12px">Open</span></div>` : (v.empty||v.spin||(v.spunAt&&Date.now()<v.spunAt))?`<div class="sticker wheelslot"><span class="pos">SUB ${i+1}</span><span class="nm" style="font-size:15px">🎰</span><span class="nat">${v.spunAt?"spinning…":"to the wheel"}</span></div>` : `<div class="sticker ${v.golden?"gold":""} ${v.isMeme?"meme":""} ${v.random?"wheel":""}"><span class="rt">${esc(v.rating||"")}</span><span class="pos">SUB</span><span class="nm">${esc(surname(v.name))}</span><span class="nat">${v.random?`<span class="tagm">WHEEL</span>`:v.isMeme?`<span class="tagm">FILLER</span>`:esc(v.nationalTeam||"")}</span></div>`).join("");
@@ -1388,7 +1414,7 @@ function spinLoop(){
   const shown = S.t<0 ? -1 : S.revealed ? S.i : S.i-1;
   if(res){ const key=S.t<0?"wait":S.i+":"+(S.revealed?1:0);
     if(res.dataset.k!==key){ res.dataset.k=key;
-      const why = x.why==="timeout" ? "timed out" : x.why==="wrong" ? "wrong answer" : "open slot";
+      const why = x.why==="timeout" ? "timed out" : x.why==="wrong" ? "wrong answer" : x.why==="gaveup" ? "gave up" : "open slot";
       res.className="spinres"+(S.revealed?" t"+x.tier:"");
       res.innerHTML = S.t<0 ? `<div class="muted">Get ready…</div>` : S.revealed
         ? `<div class="eyebrow">${esc(G.players[x.p].team)} · ${x.where.startsWith("sub")?"bench":x.where}</div><div class="sname">${esc(x.name)}</div><div class="srate num">${x.rating}</div><div class="eyebrow">${esc(WHEEL_ODDS[x.tier]?.label||"")}</div>`
@@ -1416,7 +1442,7 @@ function panelHTML(){
           <form id="pickform" class="field" style="gap:10px" autocomplete="off">
             <div class="field"><label for="pick">${lbl}</label><input id="pick" maxlength="60" placeholder="${r.kind==="stadium"?"e.g. Estadio Azteca":r.kind==="manager"?"e.g. Carlo Ancelotti":r.kind==="aura"?"e.g. Istanbul 2005":"Type a name"}" autofocus></div>
             ${slotNote}
-            <div class="btnrow"><button class="btn gold" type="submit">Lock it in</button>${canReroll(r)?(G.squads[mySeat].rerollUsed?`<span class="muted" style="font-size:12px;align-self:center">Question change used</span>`:`<button class="btn ghost" type="button" id="reroll" title="Swap this question for a new one. Once per game; your clock resets.">New question (1 left)</button>`):""}</div>
+            <div class="btnrow"><button class="btn gold" type="submit">Lock it in</button><button class="btn ghost" type="button" id="giveup" title="${r.kind==="starter"||r.kind==="sub"?"Skip this pick. The slot goes to the wheel after the player rounds.":"Skip this pick and take the booby prize."}">Give up</button>${canReroll(r)?(G.squads[mySeat].rerollUsed?`<span class="muted" style="font-size:12px;align-self:center">Question change used</span>`:`<button class="btn ghost" type="button" id="reroll" title="Swap this question for a new one. Once per game; your clock resets.">New question (1 left)</button>`):""}</div>
             <div id="pickerr" style="color:var(--red);font-size:13px" role="alert"></div>
           </form>`;
       }
@@ -1562,6 +1588,8 @@ function prematchHTML(){
    ============================================================ */
 let SIMCACHE=null, simBusy=null, simFail=null, PB=null, lastFeedCount=-1, lastBanner="", lastCard="", lastStatsAt=-1, lastRatIdx=-1;
 let pbClock={rate:1, wall:null, pos:0};
+let bannerHold={key:"", kind:"", until:0};
+const BANNER_MS = {goal:3800, save:2400, wood:2400, pen:2600, red:3000, aura:3000, sub:2800, so:2200};
 const MX=4, MY=3, WW=105+2*MX, WH=68+2*MY, TDT=0.1;
 const COL = {A:"#2f5bff", B:"#e8322b", gkA:"#f2b705", gkB:"#21c7b8"};
 const matchKey = () => G.id+":"+G.match.seed;
@@ -1578,7 +1606,20 @@ function ensureSim(){
   });
   return null;
 }
-function playPos(){ const m=G.match; return pbClock.wall==null ? (Date.now()+matchOffset-(m.kickoffAt||0))/1000 : pbClock.pos+(Date.now()-pbClock.wall)/1000*pbClock.rate; }
+// Shared clock until someone changes speed; after that a local clock that runs at 2x/4x through the football
+// but always at real speed through the cards (time skips, half-time, full-time), so nothing flashes past.
+function playPos(){
+  const m=G.match;
+  if(pbClock.wall==null) return (Date.now()+matchOffset-(m.kickoffAt||0))/1000;
+  const now=Date.now(), dt=(now-pbClock.wall)/1000; pbClock.wall=now;
+  const pb=PB, inCard = pb && pbClock.pos>=0 ? !!locate(pb, pbClock.pos).card : true;
+  const holding = now < bannerHold.until;   // a goal or save announcement is on screen: play it at real speed
+  const next = pbClock.pos + dt * (inCard || pbClock.pos<0 || holding ? 1 : pbClock.rate);
+  // and don't cut away to a time-skip card until the announcement has finished
+  if(holding && pb && !inCard && pbClock.pos>=0 && next<pb.total && locate(pb, next).card) return pbClock.pos;
+  pbClock.pos = next;
+  return pbClock.pos;
+}
 function setRate(rate){ const pos=playPos(); pbClock={rate, wall:Date.now(), pos}; }
 
 /* ---------- highlights cut ---------- */
@@ -1764,7 +1805,7 @@ function bannerHTML(o, sim){
   if(o.kind==="pen") return `<div class="bn" style="color:${col}">Penalty!<small>${tn(e.team)}</small></div>`;
   if(o.kind==="red") return `<div class="bn"><i class="redcard"></i>Red card<small>${n(e.p)} · ${tn(e.team)}</small></div>`;
   if(o.kind==="aura") return `<div class="bn" style="color:var(--saffron)">Aura<small>${esc(e.name)}</small></div>`;
-  if(o.kind==="sub") return `<div class="subboard"><div class="row"><span class="tm" style="background:${e.team==="A"?COL.A:COL.B}">${tn(e.team)}</span><span class="in">▲ ${n(e.p)}</span><span class="out">▼ ${n(e.out)}</span></div></div>`;
+  if(o.kind==="sub") return `<div class="subboard"><div class="row"><span class="tm" style="background:${e.team==="A"?COL.A:COL.B}">${tn(e.team)}</span><span class="in">▲ ${n(e.p)}</span><span class="out">▼ ${n(e.out)}</span></div>${e.why&&e.why!=="fresh legs"?`<div class="row" style="font-size:.7em;opacity:.8">${e.why==="tired"?"Out of gas":e.why==="poor"?"Off the pace today":e.why==="booked"?"On a yellow":e.why==="attack"?"Going for it":""}</div>`:""}</div>`;
   if(o.kind==="so") return `<div class="bn" style="color:${e.scored?col:"#fff"}">${e.scored?"Scored!":"Missed!"}<small>${n(e.p)} · ${e.score.A}–${e.score.B}</small></div>`;
   return "";
 }
@@ -1799,6 +1840,9 @@ function liveStats(pb, k){
   const row=(lab,a,b,fa,fb)=>{ const tot=(fa??a)+(fb??b)||1; return `<tr><td>${a}</td><td><div class="lsl">${lab}</div><div class="lsb"><i style="width:${100*(fa??a)/tot}%;background:${COL.A}"></i><i style="width:${100*(fb??b)/tot}%;background:${COL.B}"></i></div></td><td>${b}</td></tr>`; };
   return row("Possession", pa+"%", (100-pa)+"%", pa, 100-pa) + row("Shots", s.A.shots, s.B.shots) + row("On target", s.A.onT, s.B.onT) + row("xG", s.A.xg.toFixed(2), s.B.xg.toFixed(2), s.A.xg, s.B.xg) + row("Corners", s.A.corners, s.B.corners) + row("Fouls", s.A.fouls, s.B.fouls) + row("Cards", s.A.cards, s.B.cards);
 }
+// stamina left (0-100) for a player at a moment, from the engine's record
+function staAt(pb, i, k){ const arr=pb.sim.stamina?.[i]; if(!arr||!arr.length) return null; let j=Math.max(0,Math.min(arr.length-1,Math.floor(k/100))); while(j>0 && !arr[j]) j--; return arr[j]||null; }
+const staCol = v => v>=65 ? "var(--ok)" : v>=45 ? "#e0a100" : "var(--red)";
 function ratingsHTML(pb, k){
   const rat=ratingsAt(pb, k), sim=pb.sim;
   const col=side=>{ const rows=sim.ents.map((e,i)=>({e,i})).filter(({e,i})=>e.team===side && pb.entered[i]!=null && pb.entered[i]<=k);
@@ -1806,7 +1850,8 @@ function ratingsHTML(pb, k){
       const g=pb.goals.filter(x=>x.tick<=k && x.p===i && !x.og).length, as=pb.goals.filter(x=>x.tick<=k && x.assist===i && !x.og).length;
       const off=pb.left[i]!=null && pb.left[i]<=k, red=sim.events.some(x=>x.type==="red" && x.p===i && x.tick<=k), yel=sim.events.some(x=>x.type==="yellow" && x.p===i && x.tick<=k);
       const v=rat.r[i], cls=v==null?"":v>=7.5?"hi":v<6?"lo":"";
-      return `<div class="rrow ${off?"off":""}"><b class="rv ${cls}">${v==null?"–":v.toFixed(1)}</b><span class="rn">${esc(surname(e.name))}${e.meme?' <span class="tagm">58</span>':""}</span><span class="ri">${"⚽".repeat(g)}${as?"🅰️".repeat(Math.min(as,3)):""}${red?"🟥":yel?"🟨":""}${pb.entered[i]>0?'<span class="in">▲</span>':""}${off&&!red?'<span class="out">▼</span>':""}${rat.tag[i]||""}</span></div>`; }).join("")}</div>`; };
+      const sa=staAt(pb,i,off?pb.left[i]:k);
+      return `<div class="rrow ${off?"off":""}"><b class="rv ${cls}">${v==null?"–":v.toFixed(1)}</b><span class="rn">${esc(surname(e.name))}${e.meme?' <span class="tagm">58</span>':""}${sa!=null?`<i class="sta" title="Stamina ${sa}%"><b style="width:${sa}%;background:${staCol(sa)}"></b></i>`:""}</span><span class="ri">${"⚽".repeat(g)}${as?"🅰️".repeat(Math.min(as,3)):""}${red?"🟥":yel?"🟨":""}${pb.entered[i]>0?'<span class="in">▲</span>':""}${off&&!red?'<span class="out">▼</span>':""}${rat.tag[i]||""}</span></div>`; }).join("")}</div>`; };
   return col("A")+col("B");
 }
 function momentumSVG(pb){
@@ -1846,7 +1891,7 @@ function matchHTML(){
      </div>
      <div style="display:grid;gap:16px;align-content:start">
        <div class="dossier"><div class="eyebrow">Live stats</div><table class="statt ls" id="lstats"></table></div>
-       <div class="dossier"><div class="eyebrow">Player ratings · 🔥 on fire · 🧊 ice cold</div><div class="rgrid" id="ratings"></div></div>
+       <div class="dossier"><div class="eyebrow">Player ratings · 🔥 on fire · 🧊 ice cold · bar = stamina</div><div class="rgrid" id="ratings"></div></div>
        <div class="dossier">
          <div class="eyebrow">Scouting dossier</div>
          <h4>${esc(rep?.headline || `${A} vs ${B}`)}</h4>
@@ -1877,10 +1922,10 @@ function ftReportHTML(pb){
   const mom = momentumSVG(pb).replace('<rect id="momrev" x="0" y="0" width="0" height="80"/>','<rect x="0" y="0" width="1000" height="80"/>').replace(/momclip/g,"momclipft");
   const evAt = (type,i)=>sim.events.find(e=>e.type===type && (type==="sub"?(e.p===i||e.out===i):e.p===i));
   const team = side => { const rows = sim.ents.map((e,i)=>({e,i})).filter(({e})=>e.team===side && e.played);
-    return `<div class="ftteam"><div class="eyebrow" style="color:${COL[side]}">${tn(side)}</div><div class="tablewrap"><table class="pt"><thead><tr><th>Player</th><th>Rating</th><th title="Goals">G</th><th title="Assists">A</th><th title="Shots (on target)">Sh</th><th title="Key passes">KP</th><th title="Passes completed">Pass</th><th title="Tackles + interceptions">Tk</th><th title="Dribbles">Dr</th><th title="Saves">Sv</th></tr></thead><tbody>${rows.map(({e,i})=>{
+    return `<div class="ftteam"><div class="eyebrow" style="color:${COL[side]}">${tn(side)}</div><div class="tablewrap"><table class="pt"><thead><tr><th>Player</th><th>Rating</th><th title="Goals">G</th><th title="Assists">A</th><th title="Shots (on target)">Sh</th><th title="Key passes">KP</th><th title="Passes completed">Pass</th><th title="Tackles + interceptions">Tk</th><th title="Dribbles">Dr</th><th title="Saves">Sv</th><th title="Stamina left at the end of his game">Stam</th></tr></thead><tbody>${rows.map(({e,i})=>{
       const t=e.st, v=e.rating, tag=v>=7.6?"🔥":v<=5.9?"🧊":"", subIn=sim.events.find(x=>x.type==="sub"&&x.p===i), subOut=sim.events.find(x=>x.type==="sub"&&x.out===i), red=sim.events.find(x=>x.type==="red"&&x.p===i), yel=sim.events.some(x=>x.type==="yellow"&&x.p===i);
       return `<tr class="${motm&&motm.id===e.id?"motm":""}"><td><b>${esc(e.name)}</b> <span class="muted">${esc(e.g)}</span>${motm&&motm.id===e.id?' <span class="pill gold" style="font-size:10px;padding:1px 6px">MOTM</span>':""}${e.meme?' <span class="tagm">FILLER</span>':""} ${red?"🟥":yel?"🟨":""}${subIn?` <span class="in">▲${minLabel(sim,subIn)}</span>`:""}${subOut?` <span class="out">▼${minLabel(sim,subOut)}</span>`:""}</td>
-        <td><b class="rv ${v>=7.5?"hi":v<6?"lo":""}">${v.toFixed(1)}</b>${tag}</td><td>${t.goals||""}</td><td>${t.assists||""}</td><td>${t.shots?`${t.shots} (${t.onT})`:""}</td><td>${t.keyPasses||""}</td><td>${t.passes?`${t.passOk}/${t.passes}`:""}</td><td>${(t.tackles+t.intercepts)||""}</td><td>${t.dribbles||""}</td><td>${t.saves||""}</td></tr>`; }).join("")}</tbody></table></div></div>`; };
+        <td><b class="rv ${v>=7.5?"hi":v<6?"lo":""}">${v.toFixed(1)}</b>${tag}</td><td>${t.goals||""}</td><td>${t.assists||""}</td><td>${t.shots?`${t.shots} (${t.onT})`:""}</td><td>${t.keyPasses||""}</td><td>${t.passes?`${t.passOk}/${t.passes}`:""}</td><td>${(t.tackles+t.intercepts)||""}</td><td>${t.dribbles||""}</td><td>${t.saves||""}</td><td>${(()=>{ const sa=staAt(pb,i,pb.left[i]!=null?pb.left[i]:pb.ft-1); return sa!=null?`<span style="color:${staCol(sa)};font-weight:700">${sa}%</span>`:""; })()}</td></tr>`; }).join("")}</tbody></table></div></div>`; };
   void evAt;
   return `<div class="ftrhead"><div class="eyebrow">Full time · match report</div>
       <h4>${wn?esc(wn)+" win":"It's a draw"} · ${sim.final.A}–${sim.final.B}${sim.pens?` (${sim.pens.A}–${sim.pens.B} on penalties)`:""}</h4>
@@ -1915,8 +1960,14 @@ function frame(force){
     else if(L.card && L.card.type!=="cut"){ vc.hidden=false; vc.className="vcard"; vc.innerHTML=cardHTML(pb, L.card); }
     else { vc.hidden=true; vc.innerHTML=""; } }
   if(vc) vc.classList.toggle("cut", !!(L.card && L.card.type==="cut"));
-  const gb=$("#goalbanner"), ov=L.card||L.pre ? null : overlayAt(pb, ki), bk=ov ? ov.kind+ov.e.tick : "";
-  if(bk!==lastBanner && gb){ lastBanner=bk; gb.innerHTML = ov ? bannerHTML(ov, sim) : ""; }
+  // announcements are held for a fixed real time, whatever the playback speed
+  const gb=$("#goalbanner"), ov=L.card||L.pre ? null : overlayAt(pb, ki), bk=ov ? ov.kind+ov.e.tick : "", nowW=Date.now();
+  if(gb){
+    if(bk && bk!==bannerHold.key && !(bannerHold.key && nowW<bannerHold.until && bannerHold.kind==="goal" && ov.kind!=="goal")){ bannerHold={key:bk, kind:ov.kind, until:nowW+BANNER_MS[ov.kind], html:bannerHTML(ov, sim)}; gb.innerHTML=bannerHold.html; lastBanner=bk; }
+    else if(force && lastBanner && nowW<bannerHold.until) gb.innerHTML=bannerHold.html;
+    else if(lastBanner && nowW>=bannerHold.until){ lastBanner=""; gb.innerHTML=""; }
+    if(L.card && lastBanner){ lastBanner=""; gb.innerHTML=""; bannerHold.until=0; }
+  }
   // feed
   const shown = L.pre ? [] : pb.feedIdx.filter(i=>sim.events[i].tick<=ki || L.done);
   if(shown.length!==lastFeedCount || force){
@@ -1953,6 +2004,8 @@ function bind(){
   on("[data-slot]","keydown",e=>{ if(e.key==="Enter"||e.key===" "){ e.preventDefault(); uiSel.slot=e.currentTarget.dataset.slot; render(); } });
   on("[data-cap]","click",e=>submitCaptain(e.currentTarget.dataset.cap));
   on("#reroll","click",()=>{ if(G?.round) commit(M.reroll(G.round.key, mySeat)); });
+  on("#giveup","click",()=>{ const r=G?.round; if(!r) return; const what = r.kind==="starter"||r.kind==="sub" ? "That slot goes to the wheel at the end of the player rounds." : r.kind==="manager" ? "You'll get a booby-prize manager." : r.kind==="stadium" ? "You'll play at a half-empty training ground." : "You'll have no aura.";
+    if(confirm(`Give up this pick? ${what}`)) commit(M.giveUp(r.key, mySeat, uiSel.slot)); });
   on("[data-rv]","click",e=>review(e.currentTarget.dataset.rv));
   on("#skip","click",()=>{ if(!G?.match) return; const pb=getPB(); if(!pb) return; pbClock={rate:1, wall:Date.now(), pos:pb.total+1, skipped:true}; document.querySelectorAll("[data-rate]").forEach(b=>b.classList.toggle("sel", b.dataset.rate==="1")); frame(true); });
   on("[data-rate]","click",e=>{ if(!G?.match) return; const r=+e.currentTarget.dataset.rate; setRate(r); document.querySelectorAll("[data-rate]").forEach(b=>b.classList.toggle("sel", +b.dataset.rate===r)); });

@@ -26,6 +26,8 @@ const sq = x => x * x;
 function tab(T, x) { if (x <= T[0][0]) return T[0][1]; for (let i = 1; i < T.length; i++) { if (x <= T[i][0]) { const a = T[i - 1], b = T[i]; return a[1] + (b[1] - a[1]) * (x - a[0]) / (b[0] - a[0]); } } return T[T.length - 1][1]; }
 function mulberry(seed) { let a = seed >>> 0; return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
 export const GROUP = g => g === "GK" ? "GK" : (g === "CB" || g === "FB") ? "DEF" : (g === "DM" || g === "CM" || g === "AM") ? "MID" : "FWD";
+// Positions a bench player can cover: his own, or a neighbouring role.
+const COVER = { GK: ["GK"], CB: ["CB", "DM", "FB"], FB: ["FB", "CB", "W"], DM: ["DM", "CM", "CB"], CM: ["CM", "DM", "AM"], AM: ["AM", "CM", "W"], W: ["W", "AM", "FB", "ST"], ST: ["ST", "W", "AM"] };
 const num = (v, d) => typeof v === "number" && isFinite(v) && v > 0 ? v : d;
 
 /* ---------- chance quality ---------- */
@@ -127,6 +129,7 @@ export function simulateMatch(input) {
       nextDec: 0, controlUntil: 0, duelCd: 0, carryStart: 0, firstTime: false, volley: false, restartKick: false, fadeIn: null, fadeLen: 0.5, fadeAt: null, goneAt: null, carry: null, hands: false, dive: null, nu: rr(-1, 1), nv: rr(-1, 1), enteredAt: 0, lastPass: null, lastBeat: -999,
       st: { passes: 0, passOk: 0, shots: 0, onT: 0, goals: 0, assists: 0, tackles: 0, intercepts: 0, dribbles: 0, saves: 0, keyPasses: 0, fouls: 0 }
     };
+    p.g0 = g;
     p.vmax = (p.G === "GK" ? 5.2 + 3.0 * p.a.pac : 5.6 + 4.0 * p.a.pac) * (p.tags.has("speedster") ? 1.03 : 1);
     p.acc = 3.2 + 2.8 * p.a.pac;
     ents.push(p); return p;
@@ -161,7 +164,7 @@ export function simulateMatch(input) {
     const victim = pool[floor(R() * pool.length)], roll = d6();
     rolls["injury" + team.side] = { who: victim.name, roll };
     if (roll === 1) {
-      const repl = team.bench.find(b => b.G === victim.G) || team.bench.find(b => b.G !== "GK") || team.bench[0];
+      const repl = team.bench.find(b => b.g0 === victim.slot.g) || team.bench.find(b => (COVER[b.g0] || []).includes(victim.slot.g)) || team.bench.find(b => b.G === victim.G) || team.bench.find(b => b.G !== "GK") || team.bench[0];
       const i = team.players.indexOf(victim); victim.state = "injured";
       if (repl) { team.bench.splice(team.bench.indexOf(repl), 1); repl.slot = victim.slot; repl.g = victim.slot.g; team.players.splice(i, 1, repl); rolls["injury" + team.side].replacedBy = repl.name; }
       else team.players.splice(i, 1);
@@ -205,14 +208,14 @@ export function simulateMatch(input) {
   /* ---------- recording ---------- */
   const MAXT = 66000, E = ents.length;
   const REC = { X: new Int16Array(MAXT * E), Y: new Int16Array(MAXT * E), F: new Uint8Array(MAXT * E), BX: new Int16Array(MAXT), BY: new Int16Array(MAXT), BZ: new Int16Array(MAXT), OW: new Int8Array(MAXT), PO: new Uint8Array(MAXT), CL: new Uint16Array(MAXT), MD: new Uint8Array(MAXT) };
-  const MOM = [], RAT = ents.map(() => []);
+  const MOM = [], RAT = ents.map(() => []), STA = ents.map(() => []);
   function record() {
     const k = S.tick; if (k >= MAXT) return;
     for (let i = 0; i < E; i++) { const p = ents[i]; REC.X[k * E + i] = round(p.x * 10); REC.Y[k * E + i] = round(p.y * 10); REC.F[k * E + i] = (p.on ? 1 : 0) | (p.playing ? 2 : 0) | (p.hands ? 4 : 0) | (p.dive ? 8 : 0); }
     REC.BX[k] = round(B.x * 10); REC.BY[k] = round(B.y * 10); REC.BZ[k] = round(B.z * 10);
     REC.OW[k] = B.owner ? B.owner.id : -1; REC.PO[k] = S.poss === T.B ? 1 : 0; REC.CL[k] = round(S.clock);
     REC.MD[k] = S.shootout ? 4 : B.mode === "dead" ? 1 : 0;
-    if (k % 100 === 0) { MOM.push(round(momentum() * 100)); for (let i = 0; i < E; i++) RAT[i].push(ents[i].on || ents[i].state === "off" ? round(ents[i].rating * 10) : 0); }
+    if (k % 100 === 0) { MOM.push(round(momentum() * 100)); for (let i = 0; i < E; i++) { RAT[i].push(ents[i].on || ents[i].state === "off" ? round(ents[i].rating * 10) : 0); STA[i].push(ents[i].state === "bench" || ents[i].state === "injured" ? 0 : round(ents[i].energy * 100)); } }
   }
   const momentum = () => (T.A.momP - T.B.momP) / (T.A.momP + T.B.momP + 0.8);
 
@@ -444,8 +447,9 @@ export function simulateMatch(input) {
       else if (B.mode === "play") { const bx = B.x - p.x, by = B.y - p.y, bd = hyp(bx, by); if (bd > 0.1) { p.fx += (bx / bd - p.fx) * 0.2; p.fy += (by / bd - p.fy) * 0.2; const f = hyp(p.fx, p.fy) || 1; p.fx /= f; p.fy /= f; } }
       // fatigue
       if (p.playing) {
-        const r = sp / p.vmax; let drain = (2.2e-6 + 6.5e-5 * r * r * r) * (1.3 - 0.6 * p.a.sta) * drainMul(p.team);
-        if (r < 0.3) drain -= 1.6e-6;
+        const r = sp / p.vmax, tc = p.team.tac;
+        let drain = (3.0e-6 + 0.95e-4 * r * r * r) * (1.5 - 0.85 * p.a.sta) * (0.8 + 0.3 * tc.press + 0.15 * tc.tempo) * drainMul(p.team);
+        if (r < 0.3) drain -= 2.2e-6;
         p.energy = clamp(p.energy - drain, 0.2, 1);
       }
       if (p.state === "leaving" && (p.y < -1.2 || p.y > W + 1.2)) { p.on = false; p.state = "off"; }
@@ -742,7 +746,7 @@ export function simulateMatch(input) {
   function saveAttempt(gk, d, reach) {
     DBG.gk.att++;
     const sh = B.shot, sp = hyp(B.vx, B.vy), stretch = clamp((d - 0.45) / max(0.3, reach - 0.45), 0, 1);
-    let ps = 0.72 + 0.42 * gk.a.gkr + 0.12 * gk.a.gkh - max(0, sp - 22) * 0.02 - stretch * 0.32 - (B.z > 1.9 ? 0.08 : 0) - (sh.header ? 0.25 : 0) + (gk.tags.has("shot-stopper") ? 0.05 : 0);
+    let ps = 0.74 + 0.42 * gk.a.gkr + 0.12 * gk.a.gkh - max(0, sp - 22) * 0.02 - stretch * 0.32 - (B.z > 1.9 ? 0.08 : 0) - (sh.header ? 0.25 : 0) + (gk.tags.has("shot-stopper") ? 0.05 : 0);
     const mir = gk.team.aura && gk.team.aura.trigger === "keeper_miracle" && !gk.team.auraState.used && sh.xg >= 0.25;
     if (mir) { ps += 0.5; }
     if (sh.forced === "goal") ps = -1; else if (sh.forced === "saved") ps = 2;
@@ -814,7 +818,7 @@ export function simulateMatch(input) {
         DBG.duelTry = (DBG.duelTry || 0) + 1;
         if (R() < P) { DBG.duelWin = (DBG.duelWin || 0) + 1; DEBUG && chain(`${team.side} BEAT ${o.name.split("-")[0]}`); o.stun = S.tick + 11; p.lastBeat = S.tick; p.st.dribbles++; rate(p, 0.08); rate(o, -0.05); continue; }
         const inBox = U(team, p.x) > L - BOX_D && abs(V(team, p.y) - CY) < BOX_H;
-        if (R() < (0.025 + 0.05 * o.a.agg) * RF.foul * (inBox ? 0.35 : 1) * (team.aura && team.aura.trigger === "chaos" ? 1.4 : 1)) { foul(o, p); return; }
+        if (R() < (0.025 + 0.05 * o.a.agg) * RF.foul * (inBox ? 0.15 : 1) * (team.aura && team.aura.trigger === "chaos" ? 1.4 : 1)) { foul(o, p); return; }
         o.team.stats.tackles++; o.st.tackles++; rate(o, 0.12); rate(p, -0.06);
         if (R() < 0.4) { B.owner = null; B.mode = "play"; B.vx = (o.x - p.x) * 2.5 + rr(-3, 3); B.vy = (o.y - p.y) * 2.5 + rr(-3, 3); B.vz = 0; B.last = o; B.lastTeam = o.team; B.flight++; B.tried = {}; B.kicker = null; }
         else giveBall(o);
@@ -836,7 +840,7 @@ export function simulateMatch(input) {
         const behind = (o.x - p.x) * p.fx + (o.y - p.y) * p.fy < -0.3;
         const chaos = team.aura && team.aura.trigger === "chaos" ? 1.4 : 1;
         const inBox = U(team, p.x) > L - BOX_D && abs(V(team, p.y) - CY) < BOX_H;
-        const pf = 0.0024 * (0.4 + o.a.agg) * (behind ? 2 : 1) * RF.foul * chaos * (weather === "Heavy rain" ? 1.2 : 1) * (inBox ? 0.15 : 1) * (presser ? 1.3 : 1);
+        const pf = 0.0024 * (0.4 + o.a.agg) * (behind ? 2 : 1) * RF.foul * chaos * (weather === "Heavy rain" ? 1.2 : 1) * (inBox ? 0.09 : 1) * (presser ? 1.3 : 1);
         if (R() < pf) { o.tackleCd = S.tick + 20; foul(o, p); return; }
       }
     }
@@ -848,7 +852,7 @@ export function simulateMatch(input) {
     const shield = p.carry && p.carry.hold ? 1.5 : 1;
     const ps = clamp(0.45 + 0.6 * (o.a.tac - 0.75 * p.a.dri) - 0.25 * (p.a.str - o.a.str) * shield, 0.12, 0.85);
     const boxFoul = U(p.team, p.x) > L - BOX_D && abs(V(p.team, p.y) - CY) < BOX_H;
-    if (R() < pf * (boxFoul ? 0.14 : 1)) { foul(o, p); return; }
+    if (R() < pf * (boxFoul ? 0.08 : 1)) { foul(o, p); return; }
     if (R() < ps) {
       o.team.stats.tackles++; o.st.tackles++; rate(o, 0.11); rate(p, -0.05);
       if (R() < 0.35) { const f = o.team; B.owner = null; B.mode = "play"; B.vx = (p.x - o.x) * 2 + rr(-3, 3); B.vy = (p.y - o.y) * 2 + rr(-3, 3); B.vz = 0; B.last = o; B.lastTeam = f; B.flight++; B.tried = {}; }
@@ -1042,7 +1046,7 @@ export function simulateMatch(input) {
         const dfn = def.p, chaos = p.team.aura && p.team.aura.trigger === "chaos" ? 1.3 : 1;
         DBG.toTry = (DBG.toTry || 0) + 1;
         if (R() < o.P) { DBG.toWin = (DBG.toWin || 0) + 1; DEBUG && chain(`${team.side} BEAT ${dfn.name.split("-")[0]}`); dfn.stun = S.tick + 11; p.lastBeat = S.tick; p.st.dribbles++; rate(p, 0.09); rate(dfn, -0.05); }
-        else if (R() < (0.08 + 0.14 * dfn.a.agg) * RF.foul * chaos * (U(p.team, p.x) > L - BOX_D && abs(V(p.team, p.y) - CY) < BOX_H ? 0.45 : 1)) { foul(dfn, p); return; }
+        else if (R() < (0.08 + 0.14 * dfn.a.agg) * RF.foul * chaos * (U(p.team, p.x) > L - BOX_D && abs(V(p.team, p.y) - CY) < BOX_H ? 0.18 : 1)) { foul(dfn, p); return; }
         else { dfn.team.stats.tackles++; dfn.st.tackles++; rate(dfn, 0.11); rate(p, -0.07); if (R() < 0.4) { B.owner = null; B.mode = "play"; B.vx = (dfn.x - p.x) * 2.5 + rr(-3, 3); B.vy = (dfn.y - p.y) * 2.5 + rr(-3, 3); B.last = dfn; B.lastTeam = dfn.team; B.flight++; B.tried = {}; } else giveBall(dfn); return; }
       }
     }
@@ -1232,28 +1236,37 @@ export function simulateMatch(input) {
 
   /* ---------- managers ---------- */
   function managerSubs(team) {
-    if (S.shootout || team.subs >= 3 || !team.bench.length || clockMin() < 56) return;
+    if (S.shootout || team.subs >= 3 || !team.bench.length || clockMin() < 46) return;
     if (S.lastSubCheck && S.lastSubCheck[team.side] && S.tick - S.lastSubCheck[team.side] < 450) return;
     S.lastSubCheck = S.lastSubCheck || {}; S.lastSubCheck[team.side] = S.tick;
     const min_ = clockMin(), diff = team.score - team.opp.score, smart = team.mgr;
-    const need = p => (p.energy < 0.68 ? (0.68 - p.energy) * 3 : 0) + (p.rating < 6.4 ? (6.4 - p.rating) * 0.8 : 0) + (p.yellow && p.G === "DEF" && min_ > 65 ? 0.25 : 0) + (p.meme ? 0.45 : 0) + (min_ > 70 ? 0.15 : 0);
-    let cands = team.onPitch.filter(p => p.G !== "GK" && p.enteredAt === 0).map(p => ({ p, n: need(p) })).filter(o => o.n > 0.28 - 0.1 * smart).sort((a, b) => b.n - a.n || a.p.id - b.p.id);
-    let attacking = diff < 0 && min_ > 66;
-    if (!cands.length && attacking) cands = team.onPitch.filter(p => p.enteredAt === 0 && p.G === "DEF" || (p.slot && p.slot.g === "DM")).map(p => ({ p, n: 0.4 })).sort((a, b) => a.p.rating - b.p.rating || a.p.id - b.p.id);
-    if (!cands.length) return;
-    const out = cands[0].p;
-    const fits = team.bench.filter(b => b.G !== "GK");
-    if (!fits.length) return;
-    const want = attacking ? "FWD" : out.G;
-    const inn = [...fits].sort((a, b) => ((b.G === want ? 10 : 0) + b.ovr) - ((a.G === want ? 10 : 0) + a.ovr) || a.id - b.id)[0];
+    const bench = team.bench.filter(b => b.state === "bench" && b.G !== "GK");
+    if (!bench.length) return;
+    const fit = (b, slotG) => b.g0 === slotG ? 1 : (COVER[b.g0] || []).includes(slotG) ? 0.6 : 0;
+    // tired legs first, then a bad game; a booked defender late on is a risk worth removing
+    const need = p => (p.energy < 0.6 ? (0.6 - p.energy) * 4 : 0) + (p.rating < 6.2 ? (6.2 - p.rating) * 0.9 : 0)
+      + (p.yellow && min_ > 60 && (p.G === "DEF" || p.g === "DM") ? 0.3 : 0) + (p.meme ? 0.4 : 0) + (min_ > 72 ? 0.06 : 0);
+    const bar = (min_ < 60 ? 0.6 : 0.32) - 0.1 * smart;
+    let best = null;
+    for (const p of team.onPitch) {
+      if (p.G === "GK" || p.enteredAt !== 0 || !p.slot) continue;
+      const n = need(p); if (n <= bar) continue;
+      for (const b of bench) { const f = fit(b, p.slot.g); if (!f) continue; const sc = n + 0.4 * f + 0.01 * (b.ovr - p.ovr); if (!best || sc > best.sc || (sc === best.sc && b.id < best.inn.id)) best = { sc, out: p, inn: b, tactical: false }; }
+    }
+    // chasing the game late: a midfielder makes way for an extra attacker
+    if (!best && diff < 0 && min_ > 64) for (const p of team.onPitch) {
+      if (p.enteredAt !== 0 || !p.slot || (p.slot.g !== "CM" && p.slot.g !== "DM")) continue;
+      for (const b of bench) { if (b.g0 !== "AM" && b.g0 !== "W" && b.g0 !== "ST") continue; const sc = (1 - p.energy) + 0.3 * (6.8 - p.rating) + 0.01 * b.ovr; if (!best || sc > best.sc) best = { sc, out: p, inn: b, tactical: true }; }
+    }
+    if (!best) return;
+    const { out, inn, tactical } = best;
     team.bench.splice(team.bench.indexOf(inn), 1); team.subs++;
-    inn.slot = attacking && out.G !== "FWD" ? (team.onPitch.find(q => q.G === "FWD") || out).slot : out.slot;
-    if (attacking && out.G !== "FWD") inn.slot = { ...out.slot, y: min(80, out.slot.y + 25), g: out.slot.g === "CB" ? "DM" : out.slot.g };
+    inn.slot = tactical ? { ...out.slot, g: "AM", y: min(80, out.slot.y + 12) } : out.slot;
     inn.g = inn.slot.g;
     team.onPitch.splice(team.onPitch.indexOf(out), 1); out.playing = false; out.state = "leaving"; out.tx = out.x; out.ty = out.y < CY ? -3 : W + 3; out.urg = 0;
     enter(inn); inn.x = L / 2 + (team.side === "A" ? -3 : 3); inn.y = -0.8; inn.energy = 1;
     S.lastSubTick = S.tick;
-    ev("sub", { team: team.side, p: inn.id, out: out.id, tactical: attacking });
+    ev("sub", { team: team.side, p: inn.id, out: out.id, tactical, why: tactical ? "attack" : out.energy < 0.6 ? "tired" : out.rating < 6.2 ? "poor" : out.yellow ? "booked" : "fresh legs" });
   }
   function updateTactics(team) {
     const b = team.tacBase, m = team.momEff, diff = team.score - team.opp.score, mn = clockMin();
@@ -1400,7 +1413,7 @@ export function simulateMatch(input) {
   return {
     version: ENGINE_VERSION, dt: DT, ticks: N, ents: people, E,
     rec: { X: REC.X.slice(0, N * E), Y: REC.Y.slice(0, N * E), F: REC.F.slice(0, N * E), BX: REC.BX.slice(0, N), BY: REC.BY.slice(0, N), BZ: REC.BZ.slice(0, N), OW: REC.OW.slice(0, N), PO: REC.PO.slice(0, N), CL: REC.CL.slice(0, N), MD: REC.MD.slice(0, N) },
-    mom: MOM, ratings: RAT, events: S.events, rolls, final: { A: T.A.score, B: T.B.score }, pens, winner, stats,
+    mom: MOM, ratings: RAT, stamina: STA, events: S.events, rolls, final: { A: T.A.score, B: T.B.score }, pens, winner, stats,
     htTick: S.htTick, ftTick: S.ftTick, add1: S.add1, add2: S.add2, motm: motm ? motm.id : null,
     tactics: { A: T.A.tacBase, B: T.B.tacBase }, dbg: DBG
   };

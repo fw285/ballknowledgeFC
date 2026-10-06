@@ -4,7 +4,7 @@
 // Environment variables (set in Vercel → Project → Settings → Environment Variables):
 //   ANTHROPIC_API_KEY or finnapikey  (required) your key from console.anthropic.com
 //   ACCESS_CODE or Access_code       (recommended) a password players type in the lobby
-//   MODEL_FAST         (optional) model for the referee's quick first look (no web search), default claude-haiku-4-5-20251001
+//   MODEL_FAST         (optional) model for the referee's first look (no web search), default claude-sonnet-5-5
 //   MODEL_QUICK        (optional) model for referee rulings that need a web search, default claude-sonnet-5-5
 //   MODEL_DEFAULT      (optional) model for the match dossier/commentary, default claude-sonnet-5-5
 //   WEB_SEARCH         (optional) set to "off" to stop the referee looking things up
@@ -24,7 +24,7 @@ const API_KEY = () => env("ANTHROPIC_API_KEY", "finnapikey").trim();
 const ACCESS = () => env("ACCESS_CODE", "Access_code").trim();
 const SEARCH_ON = () => env("WEB_SEARCH").toLowerCase() !== "off";
 
-const MODEL_FAST = () => env("MODEL_FAST") || "claude-haiku-4-5-20251001";
+const MODEL_FAST = () => env("MODEL_FAST") || "claude-sonnet-5-5";
 const MODEL_QUICK = () => env("MODEL_QUICK") || "claude-sonnet-5-5";
 const MODEL_DEFAULT = () => env("MODEL_DEFAULT") || "claude-sonnet-5-5";
 

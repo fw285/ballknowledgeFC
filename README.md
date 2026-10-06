@@ -87,6 +87,6 @@ Send your friend the link and the access code. Each of you enters a team name an
 
 ### Cost control
 
-- Referee rulings: Claude Haiku takes a quick first look (no web search). Anything about the present day, or a name it doesn't know, goes to Claude Sonnet with web search. The pre-match dossier and commentary use Claude Sonnet.
+- Referee rulings: Claude takes a first look without web search. Anything about the present day, or a name it doesn't know, gets a second look with web search. Player ratings follow each player's best FIFA / EA FC base card. The pre-match dossier and commentary use Claude Sonnet.
 - To make everything cheaper, add the environment variable `MODEL_DEFAULT` = `claude-haiku-4-5-20251001` in Vercel. The commentary gets a bit less colorful, and the cost per game drops a lot.
 - The function also limits each visitor to 40 calls a minute, and rejects anyone without the access code.
