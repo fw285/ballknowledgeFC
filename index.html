@@ -423,6 +423,9 @@ function makeSample(){
   return fn;
 }
 let accessProblem = false;
+const pageErrors = [];
+window.addEventListener("error", e=>{ pageErrors.push(String(e.message||e.error||"error").slice(0,200)); });
+window.addEventListener("unhandledrejection", e=>{ const r=e.reason; pageErrors.push(String((r&&(r.message||r.code))||r||"promise error").slice(0,200)); });
 let uiLevel = null;
 const configured = !!FIREBASE_CONFIG.projectId;
 /* ============================================================
@@ -1070,20 +1073,13 @@ function buildEngineInput(st, seed, tac){
   }
   return JSON.parse(JSON.stringify({seed, teams}));
 }
-let engineWorker=null, engineJobs=0; const engineWaiters={};
+// The engine runs on the page itself: about half a second on a laptop, a couple of seconds on a phone.
+// (A background worker was used before, but some browsers never answer from one, which froze kick-off.)
 function runEngine(input){
-  return new Promise(resolve=>{
-    const local = ()=>setTimeout(()=>{ try{ const r=simulateMatch(input); r.digest=digest(r); delete r.dbg; resolve(r); }catch(e){ console.warn("engine",e); resolve(null); } }, 30);
-    try{
-      if(!engineWorker){
-        engineWorker = new Worker(new URL("./engine-worker.js", import.meta.url), {type:"module"});
-        engineWorker.onmessage = e=>{ const w=engineWaiters[e.data.id]; if(!w) return; delete engineWaiters[e.data.id]; if(e.data.error){ console.warn(e.data.error); w.fallback(); } else w.resolve(e.data.res); };
-        engineWorker.onerror = e=>{ console.warn("worker", e.message||e); const ws=Object.values(engineWaiters); for(const k in engineWaiters) delete engineWaiters[k]; engineWorker=null; ws.forEach(w=>w.fallback()); };
-      }
-      const id=++engineJobs; engineWaiters[id]={resolve, fallback:local};
-      engineWorker.postMessage({id, input});
-    }catch(e){ console.warn("no worker", e); local(); }
-  });
+  return new Promise(resolve=>setTimeout(()=>{
+    try{ const t0=performance.now(); const r=simulateMatch(input); r.digest=digest(r); delete r.dbg; console.info(`match simulated in ${Math.round(performance.now()-t0)} ms`); resolve(r); }
+    catch(e){ console.error("engine", e); pageErrors.push("Match engine: "+String(e&&e.message||e).slice(0,160)); resolve(null); }
+  }, 40));
 }
 const surnameOf = (sim, id) => id==null||!sim.ents[id] ? "" : surname(sim.ents[id].name);
 const fullOf = (sim, id) => id==null||!sim.ents[id] ? "" : sim.ents[id].name;
@@ -1332,6 +1328,7 @@ function tick(){
     const delay = mySeat===simRunner() ? (both?600:0) : 20000;
     if(now > at + delay){ const k="sim"+G.id+G.pre.deadline+":"+(G.pre.attempt||0); if(!fired[k]){ fired[k]=1; runMatch(); } }
   }
+  if(G.phase==="report" && G.reportStartedAt && now-G.reportStartedAt>40000 && !$("#retrykick") && mySeat){ const k="rk"+G.reportStartedAt; if(!fired[k]){ fired[k]=1; render(); } }
   if(G.phase==="report" && G.reportStartedAt && now-G.reportStartedAt>150000){ const k="rp"+G.reportStartedAt; if(!fired[k]){ fired[k]=1; commit(st=>{ if(st.phase!=="report"||Date.now()-st.reportStartedAt<150000) return false; st.phase="prematch"; if(st.pre){ st.pre.attempt=(st.pre.attempt||0)+1; st.pre.deadline=Date.now()+20000; } pushLog(st,"The match host dropped out. Restarting kick-off."); }); } }
 }
 
@@ -1350,33 +1347,49 @@ async function review(action){ if(!G?.round) return; await commit(M.resolve(G.ro
 
 async function runMatch(){
   if(!G || G.phase!=="prematch") return;
-  try{ const l = await gameRef.acquire({holder:me.id, ttlMs:180000}); if(!l.acquired) return; }catch(e){}
+  try{ await runMatchSteps(); }
+  catch(e){ console.error("kick-off", e); kickNote("Kick-off failed: "+(e&&e.message||e)); const msg=String(e&&e.message||e).slice(0,140);
+    await commit(st=>{ if(st.phase!=="report") return false; st.phase="prematch"; pushLog(st, `Kick-off failed (${msg}). Press Start match to try again.`); }); }
+}
+async function runMatchSteps(){
+  kickNote("Getting the teams ready");
+  try{ const l = await gameRef.acquire({holder:me.id, ttlMs:90000}); if(!l.acquired){ kickNote("The other device is starting the match"); return; } }catch(e){ console.warn("lock", e); }
   const ok0 = await commit(st=>{ if(st.phase!=="prematch") return false; st.phase="report"; st.reportStartedAt=Date.now(); pushLog(st, st.pre && st.pre.prep!=="done" ? "Finishing the scouting, then kick-off." : "The teams are out. Simulating the match."); });
   if(!ok0) return;
   // scouting decides how every player plays, so kick-off waits for it (it normally finishes during the team talk);
   // if it stalls, anyone still unscouted plays on stats estimated from his rating
-  if(prepRunning) await Promise.race([prepRunning, new Promise(r=>setTimeout(r, 70000))]);
-  let fresh = structuredClone((await gameRef.get()).data()); if(!fresh || fresh.phase!=="report") return;
-  if(fresh.pre && fresh.pre.prep!=="done" && !prepRunning){ const n0=backfillNeeds(fresh); if(n0.need.length||n0.mgrs.length) await Promise.race([backfillSquads(fresh), new Promise(r=>setTimeout(r, 60000))]); }
+  if(prepRunning){ kickNote("Waiting for Claude's scouting reports"); await Promise.race([prepRunning, new Promise(r=>setTimeout(r, 70000))]); }
+  kickNote("Reading the squads");
+  const snap = await gameRef.get(); let fresh = snap.exists ? structuredClone(snap.data()) : null;
+  if(!fresh) throw new Error("the game couldn't be read from the database");
+  if(fresh.phase!=="report") throw new Error(`the game moved on to "${fresh.phase}" while kick-off was starting`);
+  if(fresh.pre && fresh.pre.prep!=="done" && !prepRunning){ kickNote("Claude is scouting the players"); const n0=backfillNeeds(fresh); if(n0.need.length||n0.mgrs.length) await Promise.race([backfillSquads(fresh), new Promise(r=>setTimeout(r, 60000))]); }
   const seed = (Math.floor(Math.random()*2**31)>>>0) || 7;
   const tac = {A:teamTactics(fresh,"A"), B:teamTactics(fresh,"B")};
   const input = buildEngineInput(fresh, seed, tac);
+  kickNote("Simulating the match");
   const sim = await runEngine(input);
-  if(!sim){ await commit(st=>{ if(st.phase!=="report") return false; st.phase="prematch"; pushLog(st,"The match engine failed to start. Trying again."); }); return; }
+  if(!sim) throw new Error("the match engine failed: "+(pageErrors[pageErrors.length-1]||"unknown error"));
   SIMCACHE = {key: G.id+":"+seed, sim};
+  kickNote("Saving the match");
   const ok1 = await commit(st=>{ if(st.phase!=="report") return false;
     st.squads = fresh.squads;
     st.match = {v:ENGINE_VERSION, seed, tac, level: fresh.pre?.level||"extended", digest: sim.digest,
       final: sim.final, pens: sim.pens?{A:sim.pens.A, B:sim.pens.B}:null, winner: sim.winner, stats: sim.stats,
       motm: sim.motm!=null ? sim.ents[sim.motm].name : null, rolls: sim.rolls, report:null, reportPending:!!sample && (!fresh.quick || fresh.quick.claude), kickoffAt: Date.now()+(sample && (!fresh.quick || fresh.quick.claude)?20000:(fresh.quick?4000:8000))};
     st.phase="match"; });
-  if(!ok1 || !sample || (fresh.quick && !fresh.quick.claude)) return;
+  if(!ok1) throw new Error("the match couldn't be saved to the game database");
+  kickNote("");
+  if(!sample || (fresh.quick && !fresh.quick.claude)) return;
   // Claude writes the dossier (short, shown before kick-off) and the commentary (longer, used as the highlights play) at the same time.
   const save = part => commit(st=>{ if(st.phase!=="match" || !st.match || st.match.seed!==seed) return false; st.match.report = {...(st.match.report||{}), ...part}; if(part.lines) st.match.reportPending=false; });
   const dossier = writeDossier(fresh, input, sim).then(d=>{ if(d) return save(d); });
   const lines = writeLines(fresh, input, sim).then(l=>save(l || {lines:{}}));
   await Promise.allSettled([dossier, lines]);
 }
+// What the kick-off is doing right now, shown on the waiting screen of the device running it.
+let kickStatus="", kickLog=[];
+function kickNote(t){ kickStatus=t; if(t) kickLog=[...kickLog.slice(-5), `${new Date().toLocaleTimeString()} ${t}`]; const el=$("#kickstatus"); if(el) el.textContent=t; }
 async function rematch(){
   await commit(st=>{
     if(st.phase!=="match" && st.phase!=="done") return false;
@@ -1743,7 +1756,10 @@ function prematchHTML(){
   const writing = G.phase==="report";
   if(writing || !G.pre) return `<section class="board"><div style="min-width:0"><div class="meta"><span>Kick-off</span></div>
     <div class="cat">${writing?"The teams are coming out":"Getting ready"}</div>
-    <div class="hint"><span class="spin"></span>&nbsp; ${G.pre && G.pre.prep!=="done" ? "Claude is finishing the scouting reports on every player, then the match is simulated. Usually under half a minute." : "Simulating the match. Kick-off in a few seconds."}</div></div></section>
+    <div class="hint"><span class="spin"></span>&nbsp; ${G.pre && G.pre.prep!=="done" ? "Claude is finishing the scouting reports on every player, then the match is simulated. Usually under half a minute." : "Simulating the match. Kick-off in a few seconds."}</div>
+    <div class="hint" style="margin-top:8px;opacity:.9">Now: <b id="kickstatus">${esc(kickStatus||"waiting for the device that pressed Start")}</b></div>
+    ${pageErrors.length?`<div class="hint" style="margin-top:8px;color:#ffb4ae">Error on this device: ${esc(pageErrors[pageErrors.length-1])}</div>`:""}
+    ${mySeat && G.reportStartedAt && Date.now()-G.reportStartedAt>40000 ? `<div style="margin-top:10px"><button class="btn gold sm" id="retrykick">Still stuck? Try again</button></div>`:""}</div></section>
     <div class="arena two">${teamHTML(mySeat||"A")}${teamHTML(other(mySeat||"A"))}</div>`;
   const left=mySeat||"A", right=other(left), lv=G.pre.level||"extended";
   const prepping = G.pre.prep!=="done";
@@ -2178,6 +2194,7 @@ function bind(){
   on("#create","click",createGame);
   on("#createsolo","click",createSolo);
   on("#createquick","click",createQuick);
+  on("#retrykick","click",async ()=>{ await commit(st=>{ if(st.phase!=="report") return false; st.phase="prematch"; pushLog(st,"Kick-off restarted."); }); setTimeout(()=>{ if(G?.phase==="prematch") runMatch(); }, 600); });
   on("[data-botlevel]","click",e=>{ uiLevel=e.currentTarget.dataset.botlevel; lsSet("dn_level", uiLevel); document.querySelectorAll("[data-botlevel]").forEach(b=>b.classList.toggle("sel", b.dataset.botlevel===uiLevel)); });
   on("#acode","input",e=>{ lsSet("dn_code", e.currentTarget.value.trim()); accessProblem=false; });
   on("[data-join]","click",e=>joinGame(e.currentTarget.dataset.join));

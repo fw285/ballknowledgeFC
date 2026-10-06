@@ -12,7 +12,6 @@ Files in this folder:
 
 - `index.html`: the game
 - `engine.js`: the 2D match engine (players, tactics, ball physics). Deterministic, so both devices replay the same match from a shared seed
-- `engine-worker.js`: runs the engine off the main thread so the page stays smooth
 - `questions.js`: every draft question (players, managers, stadiums, auras). Edit this to change the questions
 - `random-players.js`: the wheel's player pool and odds for slots lost to timeouts or wrong answers
 - `api/claude.js`: the server function; it holds your API key, and the page never sees it
