@@ -930,9 +930,9 @@ function backfillNeeds(st){
 async function backfillSquads(st){
   const all = backfillNeeds(st);
   if((!all.need.length && !all.mgrs.length) || !sample) return 0;
-  // batches of up to 7 players, run side by side; managers ride with the first batch
-  const batches=[]; for(let i=0;i<all.need.length;i+=7) batches.push({need:all.need.slice(i,i+7), mgrs:[]});
-  if(!batches.length) batches.push({need:[], mgrs:[]}); batches[0].mgrs=all.mgrs;
+  // small batches run side by side, so no reply gets near the length limit; managers get their own batch
+  const batches=[]; for(let i=0;i<all.need.length;i+=4) batches.push({need:all.need.slice(i,i+4), mgrs:[]});
+  if(all.mgrs.length) batches.push({need:[], mgrs:all.mgrs});
   const counts = await Promise.all(batches.map(bt=>scoutBatch(st, bt.need, bt.mgrs)));
   return counts.reduce((t,n)=>t+n,0);
 }
@@ -946,7 +946,7 @@ For each manager: style (possession|pressing|counter|pragmatic|direct) and tacti
 Reply with only JSON:
 {"players":[{"i":0,"canonicalName":"Full Name","rating":85,"attack":70,"defense":60,"pace":75,"nationalTeam":"Country","clubs":["Club A"],"retired":false,"fiery":false,"positions":["CM"],"foot":"R","heightCm":180,"attrs":{"pac":75,"dri":80,"pas":85,"vis":84,"cro":70,"fin":68,"lon":74,"hea":55,"tac":66,"mar":64,"str":62,"sta":86,"agg":60,"com":85},"tags":["box-to-box"]}],"managers":[{"i":0,"style":"possession","tactics":{"press":8,"line":8,"width":7,"tempo":5,"mentality":7,"buildUp":"short","fullbacks":"inverted","counter":false},"trademark":"his signature idea in under 10 words"}]}`;
   try{
-    const res = await sample.json(prompt, {modelTier:"quick", cache:false, timeoutMs:55000});
+    const res = await sample.json(prompt+"\nWrite the JSON compactly, on one line.", {modelTier:"default", cache:false, timeoutMs:55000});
     if(!res || typeof res!=="object") throw {code:"invalid_json"};
     let n=0;
     for(const o of (Array.isArray(res.players)?res.players:[])){ const it=need[o.i]; if(!it) continue; const sq=st.squads[it.p];
