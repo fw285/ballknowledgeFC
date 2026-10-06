@@ -6,7 +6,8 @@
      50%  under 75      35%  75 to 84      10%  85 to 89      5%  90+
 
    then a random player from this pool who plays that position and
-   isn't already drafted. Ratings are the player at his prime.
+   isn't already drafted. Ratings are each player's peak on the modern
+   EA FC scale (best base card; Icon-style estimate for older players).
 
    One player per line:  "Name|rating|country|club"
    Positions: GK goalkeeper, CB centre-back, FB full-back, DM holding
@@ -35,8 +36,8 @@ export const WHEEL_POOL = {
     "Marc-André ter Stegen|88|Germany|Barcelona", "David de Gea|88|Spain|Manchester United", "Ederson|87|Brazil|Manchester City",
     "Gianluigi Donnarumma|88|Italy|Paris Saint-Germain", "Hugo Lloris|86|France|Tottenham", "Oliver Kahn|89|Germany|Bayern Munich",
     // 90+
-    "Gianluigi Buffon|93|Italy|Juventus", "Manuel Neuer|92|Germany|Bayern Munich", "Iker Casillas|91|Spain|Real Madrid",
-    "Peter Schmeichel|90|Denmark|Manchester United", "Alisson|90|Brazil|Liverpool", "Lev Yashin|94|Soviet Union|Dynamo Moscow", "Thibaut Courtois|90|Belgium|Real Madrid"
+    "Gianluigi Buffon|91|Italy|Juventus", "Manuel Neuer|92|Germany|Bayern Munich", "Iker Casillas|91|Spain|Real Madrid",
+    "Peter Schmeichel|90|Denmark|Manchester United", "Alisson|90|Brazil|Liverpool", "Lev Yashin|92|Soviet Union|Dynamo Moscow", "Thibaut Courtois|90|Belgium|Real Madrid"
   ],
   CB: [
     "Phil Jones|73|England|Manchester United", "Shkodran Mustafi|73|Germany|Arsenal", "Titus Bramble|66|England|Newcastle United", "Marcos Rojo|72|Argentina|Manchester United",
@@ -48,8 +49,8 @@ export const WHEEL_POOL = {
     "John Terry|89|England|Chelsea", "Rio Ferdinand|89|England|Manchester United", "Nemanja Vidić|88|Serbia|Manchester United", "Carles Puyol|89|Spain|Barcelona",
     "Giorgio Chiellini|89|Italy|Juventus", "Mats Hummels|88|Germany|Borussia Dortmund", "Rúben Dias|88|Portugal|Manchester City", "William Saliba|87|France|Arsenal",
     "Raphaël Varane|87|France|Real Madrid", "Kalidou Koulibaly|87|Senegal|Napoli", "Pepe|87|Portugal|Real Madrid",
-    "Paolo Maldini|95|Italy|AC Milan", "Franz Beckenbauer|96|Germany|Bayern Munich", "Franco Baresi|94|Italy|AC Milan", "Fabio Cannavaro|92|Italy|Juventus",
-    "Alessandro Nesta|91|Italy|AC Milan", "Virgil van Dijk|91|Netherlands|Liverpool", "Sergio Ramos|91|Spain|Real Madrid", "Thiago Silva|90|Brazil|Paris Saint-Germain"
+    "Paolo Maldini|95|Italy|AC Milan", "Franz Beckenbauer|94|Germany|Bayern Munich", "Franco Baresi|94|Italy|AC Milan", "Fabio Cannavaro|91|Italy|Juventus",
+    "Alessandro Nesta|91|Italy|AC Milan", "Virgil van Dijk|91|Netherlands|Liverpool", "Sergio Ramos|90|Spain|Real Madrid", "Thiago Silva|89|Brazil|Paris Saint-Germain"
   ],
   FB: [
     "Djimi Traoré|65|Mali|Liverpool", "Matteo Darmian|74|Italy|Inter Milan", "Danny Simpson|70|England|Leicester City", "Davide Zappacosta|73|Italy|Chelsea",
@@ -69,9 +70,9 @@ export const WHEEL_POOL = {
     "Wilfred Ndidi|81|Nigeria|Leicester City", "Nemanja Matić|82|Serbia|Chelsea", "Thomas Partey|83|Ghana|Arsenal", "Aurélien Tchouaméni|84|France|Real Madrid",
     "Pierre-Emile Højbjerg|80|Denmark|Tottenham", "Kalvin Phillips|79|England|Leeds United", "Yves Bissouma|80|Mali|Tottenham", "Fred|79|Brazil|Manchester United",
     "Moisés Caicedo|84|Ecuador|Chelsea",
-    "N'Golo Kanté|89|France|Chelsea", "Casemiro|88|Brazil|Real Madrid", "Fabinho|86|Brazil|Liverpool", "Michael Essien|88|Ghana|Chelsea",
+    "N'Golo Kanté|89|France|Chelsea", "Casemiro|89|Brazil|Real Madrid", "Fabinho|86|Brazil|Liverpool", "Michael Essien|88|Ghana|Chelsea",
     "Javier Mascherano|87|Argentina|Barcelona", "Gennaro Gattuso|87|Italy|AC Milan", "Roy Keane|89|Ireland|Manchester United", "Claude Makélélé|89|France|Real Madrid",
-    "Rodri|91|Spain|Manchester City", "Sergio Busquets|90|Spain|Barcelona", "Patrick Vieira|90|France|Arsenal", "Frank Rijkaard|91|Netherlands|AC Milan"
+    "Rodri|91|Spain|Manchester City", "Sergio Busquets|90|Spain|Barcelona", "Patrick Vieira|89|France|Arsenal", "Frank Rijkaard|91|Netherlands|AC Milan"
   ],
   CM: [
     "Anderson|71|Brazil|Manchester United", "Jack Rodwell|70|England|Manchester City", "Jonjo Shelvey|74|England|Newcastle United", "Tom Huddlestone|72|England|Tottenham",
@@ -82,8 +83,8 @@ export const WHEEL_POOL = {
     "Jude Bellingham|89|England|Real Madrid", "Federico Valverde|87|Uruguay|Real Madrid", "Pedri|87|Spain|Barcelona", "Declan Rice|87|England|Arsenal",
     "Nicolò Barella|87|Italy|Inter Milan", "Michael Ballack|89|Germany|Chelsea", "Clarence Seedorf|89|Netherlands|AC Milan", "Bastian Schweinsteiger|89|Germany|Bayern Munich",
     "Edgar Davids|87|Netherlands|Juventus", "Xabi Alonso|89|Spain|Real Madrid", "Cesc Fàbregas|88|Spain|Arsenal",
-    "Xavi|94|Spain|Barcelona", "Andrés Iniesta|93|Spain|Barcelona", "Steven Gerrard|91|England|Liverpool", "Frank Lampard|90|England|Chelsea",
-    "Andrea Pirlo|91|Italy|AC Milan", "Luka Modrić|92|Croatia|Real Madrid", "Toni Kroos|91|Germany|Real Madrid", "Paul Scholes|90|England|Manchester United", "Lothar Matthäus|93|Germany|Inter Milan"
+    "Xavi|92|Spain|Barcelona", "Andrés Iniesta|92|Spain|Barcelona", "Steven Gerrard|90|England|Liverpool", "Frank Lampard|89|England|Chelsea",
+    "Andrea Pirlo|90|Italy|AC Milan", "Luka Modrić|91|Croatia|Real Madrid", "Toni Kroos|90|Germany|Real Madrid", "Paul Scholes|90|England|Manchester United", "Lothar Matthäus|92|Germany|Inter Milan"
   ],
   AM: [
     "Jesse Lingard|74|England|Manchester United", "Ross Barkley|74|England|Everton", "Adnan Januzaj|72|Belgium|Manchester United", "Josh McEachran|64|England|Chelsea",
@@ -93,8 +94,8 @@ export const WHEEL_POOL = {
     "Mesut Özil|88|Germany|Arsenal", "Martin Ødegaard|88|Norway|Arsenal", "Bruno Fernandes|87|Portugal|Manchester United", "Florian Wirtz|88|Germany|Bayer Leverkusen",
     "Jamal Musiala|88|Germany|Bayern Munich", "Juan Román Riquelme|89|Argentina|Villarreal", "Rui Costa|89|Portugal|AC Milan", "Gheorghe Hagi|89|Romania|Galatasaray",
     "Wesley Sneijder|89|Netherlands|Inter Milan", "Cole Palmer|86|England|Chelsea", "James Rodríguez|86|Colombia|Real Madrid",
-    "Zinedine Zidane|97|France|Real Madrid", "Diego Maradona|99|Argentina|Napoli", "Michel Platini|96|France|Juventus", "Kaká|93|Brazil|AC Milan",
-    "Ronaldinho|95|Brazil|Barcelona", "Zico|94|Brazil|Flamengo", "Kevin De Bruyne|92|Belgium|Manchester City"
+    "Zinedine Zidane|96|France|Real Madrid", "Diego Maradona|97|Argentina|Napoli", "Michel Platini|94|France|Juventus", "Kaká|92|Brazil|AC Milan",
+    "Ronaldinho|94|Brazil|Barcelona", "Zico|93|Brazil|Flamengo", "Kevin De Bruyne|91|Belgium|Manchester City"
   ],
   W: [
     "Bebé|55|Portugal|Manchester United", "Gabriel Obertan|63|France|Manchester United", "Andros Townsend|73|England|Crystal Palace", "Stewart Downing|74|England|Liverpool",
@@ -106,22 +107,22 @@ export const WHEEL_POOL = {
     "Bukayo Saka|87|England|Arsenal", "Leroy Sané|86|Germany|Bayern Munich", "Ángel Di María|89|Argentina|Real Madrid", "Gareth Bale|89|Wales|Real Madrid",
     "Khvicha Kvaratskhelia|87|Georgia|Napoli", "Riyad Mahrez|86|Algeria|Manchester City", "Raheem Sterling|87|England|Manchester City", "Raphinha|87|Brazil|Barcelona",
     "Lamine Yamal|88|Spain|Barcelona", "Franck Ribéry|89|France|Bayern Munich",
-    "Garrincha|95|Brazil|Botafogo", "George Best|94|Northern Ireland|Manchester United", "Arjen Robben|91|Netherlands|Bayern Munich", "Luís Figo|92|Portugal|Real Madrid",
-    "Neymar|93|Brazil|Barcelona", "Eden Hazard|91|Belgium|Chelsea", "Mohamed Salah|91|Egypt|Liverpool", "Lionel Messi|99|Argentina|Barcelona", "Vinícius Júnior|91|Brazil|Real Madrid"
+    "Garrincha|93|Brazil|Botafogo", "George Best|91|Northern Ireland|Manchester United", "Arjen Robben|91|Netherlands|Bayern Munich", "Luís Figo|91|Portugal|Real Madrid",
+    "Neymar|92|Brazil|Barcelona", "Eden Hazard|91|Belgium|Chelsea", "Mohamed Salah|90|Egypt|Liverpool", "Lionel Messi|94|Argentina|Barcelona", "Vinícius Júnior|90|Brazil|Real Madrid"
   ],
   ST: [
     "Ali Dia|45|Senegal|Southampton", "Nicklas Bendtner|71|Denmark|Arsenal", "Andy Carroll|74|England|Liverpool", "Emile Heskey|74|England|Liverpool",
     "Wout Weghorst|74|Netherlands|Burnley", "Fraizer Campbell|66|England|Hull City", "Rickie Lambert|73|England|Southampton", "Grant Holt|70|England|Norwich City",
     "Carlton Cole|69|England|West Ham", "Marouane Chamakh|70|Morocco|Arsenal", "Federico Macheda|64|Italy|Manchester United", "Jay Bothroyd|66|England|Cardiff City",
     "Dominic Calvert-Lewin|79|England|Everton", "Ollie Watkins|82|England|Aston Villa", "Gabriel Jesus|83|Brazil|Arsenal", "Jamie Vardy|84|England|Leicester City",
-    "Chris Wood|77|New Zealand|Nottingham Forest", "Dominic Solanke|79|England|Tottenham", "Danny Ings|78|England|Southampton", "Olivier Giroud|84|France|Chelsea",
+    "Chris Wood|77|New Zealand|Nottingham Forest", "Dominic Solanke|79|England|Tottenham", "Danny Ings|78|England|Southampton", "Olivier Giroud|82|France|Chelsea",
     "Álvaro Morata|83|Spain|Atlético Madrid", "Darwin Núñez|82|Uruguay|Liverpool", "Peter Crouch|77|England|Stoke City",
     "Didier Drogba|89|Ivory Coast|Chelsea", "Sergio Agüero|89|Argentina|Manchester City", "Wayne Rooney|89|England|Manchester United", "Fernando Torres|89|Spain|Liverpool",
     "Gonzalo Higuaín|87|Argentina|Napoli", "Lautaro Martínez|88|Argentina|Inter Milan", "Alexander Isak|87|Sweden|Newcastle United", "Antoine Griezmann|89|France|Atlético Madrid",
     "Radamel Falcao|89|Colombia|Atlético Madrid", "Edinson Cavani|88|Uruguay|Paris Saint-Germain", "Victor Osimhen|87|Nigeria|Napoli",
-    "Pelé|99|Brazil|Santos", "Ronaldo Nazário|98|Brazil|Real Madrid", "Cristiano Ronaldo|98|Portugal|Real Madrid", "Marco van Basten|95|Netherlands|AC Milan",
-    "Thierry Henry|94|France|Arsenal", "Gerd Müller|94|Germany|Bayern Munich", "Eusébio|95|Portugal|Benfica", "Robert Lewandowski|92|Poland|Bayern Munich",
-    "Erling Haaland|92|Norway|Manchester City", "Karim Benzema|91|France|Real Madrid", "Andriy Shevchenko|92|Ukraine|AC Milan", "Luis Suárez|92|Uruguay|Barcelona",
-    "Harry Kane|91|England|Tottenham", "Kylian Mbappé|93|France|Real Madrid"
+    "Pelé|98|Brazil|Santos", "Ronaldo Nazário|96|Brazil|Real Madrid", "Cristiano Ronaldo|94|Portugal|Real Madrid", "Marco van Basten|94|Netherlands|AC Milan",
+    "Thierry Henry|93|France|Arsenal", "Gerd Müller|93|Germany|Bayern Munich", "Eusébio|93|Portugal|Benfica", "Robert Lewandowski|92|Poland|Bayern Munich",
+    "Erling Haaland|91|Norway|Manchester City", "Karim Benzema|91|France|Real Madrid", "Andriy Shevchenko|92|Ukraine|AC Milan", "Luis Suárez|92|Uruguay|Barcelona",
+    "Harry Kane|90|England|Tottenham", "Kylian Mbappé|91|France|Real Madrid"
   ]
 };

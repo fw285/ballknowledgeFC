@@ -349,7 +349,7 @@ const FIREBASE_CONFIG = {
 };
 const API_URL = "/api/claude";
 /* Both devices must run the same version of the game. Bump this whenever the game logic changes. */
-const APP_VERSION = "2026-10-06";
+const APP_VERSION = "2026-10-06b";
 
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { initializeFirestore, doc as fdoc, getDoc, setDoc, onSnapshot as fsnap, collection as fcol, query as fquery, orderBy as forder, limit as flimit, runTransaction } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -469,7 +469,7 @@ const PICK_MS = 60000, SPEED_MS = 30000, REVIEW_MS = 30000, PREMATCH_MS = 900000
 const STAGES = [...Array(11).fill("starter"),"sub","sub","sub","spin","manager","stadium","aura","captain"];
 const SPIN_MS = 7000, SPIN_TURN = 4300;
 const GROUP = g => g==="GK"?"GK":(g==="CB"||g==="FB")?"DEF":(g==="DM"||g==="CM"||g==="AM")?"MID":"FWD";
-const RATING_SCALE = "rating = his best-ever FIFA / EA Sports FC base-card overall (the highest standard card across all editions; no TOTY, TOTS, icon or other special cards). For players from before the FIFA games, give what his peak base card would have been on the same scale. Be strict and consistent: a good-not-great Premier League winger is around 80-83, a world-class player 88-91, only all-time greats 94+. attack, defense and pace use the same 1-99 scale for that skill (a centre-back's attack is low, a striker's defense is low).";
+const RATING_SCALE = "rating = his peak on the modern EA Sports FC scale. For anyone who peaked from FIFA 13 onwards, that is his highest standard base-card overall in any edition (no TOTY, TOTS, in-form or other special cards). For earlier players, use his EA FC Icon prime card or, if he has none, what his peak would be on that same modern scale (older FIFA editions were inflated, so don't copy their numbers). Reference points: Messi 94, Cristiano Ronaldo 94, Neymar 92, Lewandowski 92, Van Dijk 91, De Bruyne 91, Mbappé 91, Haaland 91, Kane 90, Salah 90. A regular Premier League starter who was never a star is usually 76-82; a very good player at a top club 83-86; world-class 87-90; only all-time greats 93+. Never inflate. attack, defense and pace use the same 1-99 scale for that skill (a centre-back's attack is low, a striker's defense is low).";
 
 /* ============================================================
    Helpers
@@ -810,10 +810,12 @@ Your built-in football knowledge stops around mid-2026, so you do NOT know the s
 - If you don't recognize the name, search before setting recognized=false; it may be a new breakout player.
 - Don't search for settled history (old clubs, career trophies, prime ratings) you already know.
 - If searching doesn't settle it, give the benefit of the doubt and say so in the reason.
+- For a player, if you're not sure of his rating, one search such as "<player> highest FIFA rating" (FUTBIN, SoFIFA or FIFA Index list every card) settles it.
 - Squads, ages and clubs in your JSON should reflect ${season}.
 `;
   const fastHead = `${intro}
 You cannot look anything up, and your knowledge of recent seasons may be out of date. Rule from what you know. If the ruling depends on something recent you can't be sure of (his club or league right now, a retirement or transfer since 2025, events of 2025 or 2026), or you don't recognize the name, add "needsSearch":true to your JSON and still give your best guess. Otherwise add "needsSearch":false.
+Also add "ratingSure": true only if you know his peak EA FC / FIFA base card to within 2 points; otherwise false.
 `;
   const body = `CATEGORY: "${cat.wild?"Wildcard: any player (always fits)":cat.t}" (${cat.h||""})
 EXTRA DICE RULE: ${bank==="player"?diceRule:"none"}
@@ -842,7 +844,7 @@ ${shapes[bank]}`;
   let res = null;
   if(!thorough && !aboutNow){
     try{ const f = await sample.json(fastHead+"\n"+body, {modelTier:"fast", cache:false, search:false, timeoutMs:25000});
-      if(f && typeof f==="object" && f.needsSearch!==true && f.recognized!==false) res = f; }
+      if(f && typeof f==="object" && f.needsSearch!==true && f.recognized!==false && !(bank==="player" && f.ratingSure===false && f.fitsCategory)) res = f; }
     catch(e){ if(e && e.code==="bad_code") return {fail:"bad_code"}; }
   }
   if(!res){

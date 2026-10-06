@@ -28,6 +28,7 @@ function mulberry(seed) { let a = seed >>> 0; return () => { a |= 0; a = a + 0x6
 export const GROUP = g => g === "GK" ? "GK" : (g === "CB" || g === "FB") ? "DEF" : (g === "DM" || g === "CM" || g === "AM") ? "MID" : "FWD";
 // Positions a bench player can cover: his own, or a neighbouring role.
 const COVER = { GK: ["GK"], CB: ["CB", "DM", "FB"], FB: ["FB", "CB", "W"], DM: ["DM", "CM", "CB"], CM: ["CM", "DM", "AM"], AM: ["AM", "CM", "W"], W: ["W", "AM", "FB", "ST"], ST: ["ST", "W", "AM"] };
+const STRETCH = 1;
 const num = (v, d) => typeof v === "number" && isFinite(v) && v > 0 ? v : d;
 
 /* ---------- chance quality ---------- */
@@ -57,7 +58,7 @@ export function deriveAttrs(pl, g) {
   const at = num(pl.attack, G === "FWD" ? r + 2 : G === "MID" ? r - 6 : G === "DEF" ? r - 30 : 20);
   const df = num(pl.defense, G === "DEF" ? r + 2 : G === "MID" ? r - 8 : G === "GK" ? r : r - 40);
   let o;
-  if (G === "GK") o = { pac: pc - 15, dri: 40, pas: r - 22, vis: r - 25, cro: 30, fin: 20, lon: 30, hea: 40, tac: 30, mar: 40, str: r - 10, sta: r - 20, agg: 45, com: r - 6, gkr: r + 1, gkh: r - 2, gkd: r - 8, gks: r - 12 };
+  if (G === "GK") o = { pac: pc - 15, dri: 40, pas: r - 22, vis: r - 25, cro: 30, fin: 20, lon: 30, hea: 40, tac: 30, mar: 40, str: r - 10, sta: r - 20, agg: 45, com: r - 6, gkr: r + 1, gkh: r - 2, gkd: r - 1, gks: r - 12 };
   else if (g === "CB") o = { pac: pc, dri: r - 24, pas: r - 12, vis: r - 20, cro: r - 28, fin: at - 5, lon: at, hea: df, tac: df + 2, mar: df + 2, str: r + 1, sta: r - 6, agg: 66, com: r - 4 };
   else if (g === "FB") o = { pac: pc, dri: r - 10, pas: r - 8, vis: r - 14, cro: r - 5, fin: at - 8, lon: at - 6, hea: r - 16, tac: df - 2, mar: df - 4, str: r - 12, sta: r + 2, agg: 60, com: r - 6 };
   else if (g === "DM") o = { pac: pc, dri: r - 10, pas: r - 1, vis: r - 6, cro: r - 16, fin: at - 10, lon: at - 2, hea: r - 12, tac: df + 2, mar: df + 2, str: r - 4, sta: r + 2, agg: 66, com: r };
@@ -72,6 +73,8 @@ function normAttrs(pl, g) {
   const d = deriveAttrs(pl, g), src = pl.attrs && typeof pl.attrs === "object" ? pl.attrs : {}, o = {};
   for (const k of Object.keys(d)) o[k] = clamp(num(src[k], d[k]), 15, 99) / 100;
   if (pl.golden) for (const k of Object.keys(o)) o[k] = min(0.99, o[k] + 0.04);
+  // stretch the scale around 75 so the gap between good and elite players shows on the pitch
+  for (const k of Object.keys(o)) o[k] = clamp(0.75 + (o[k] - 0.75) * STRETCH, 0.1, 1.04);
   return o;
 }
 
@@ -390,8 +393,10 @@ export function simulateMatch(input) {
     }
     const m = c.marks.get(p.id);
     if (m) {
-      const mu = U(team, m.x), mv = V(team, m.y), gd = hyp(mu, mv - CY) || 1, gs = mu < 32 ? 1.4 : 2.2;
-      const w = mu < 30 ? 0.85 : mu < 55 ? 0.65 : 0.35;
+      // good markers sit tighter and goal-side; poor ones leave a yard
+      const mk = 0.5 * p.a.mar + 0.25 * p.a.tac + 0.25 * p.a.com;
+      const mu = U(team, m.x), mv = V(team, m.y), gd = hyp(mu, mv - CY) || 1, gs = (mu < 32 ? 1.4 : 2.2) * (1.65 - 0.85 * mk);
+      const w = min(0.95, (mu < 30 ? 0.85 : mu < 55 ? 0.65 : 0.35) * (0.7 + 0.4 * mk));
       u = lerp(u, mu - mu / gd * gs, w); v = lerp(v, mv + (CY - mv) / gd * gs, w); urg = mu < 35 || m.run ? 3 : 2;
     }
     const pu = U(team, p.x);
@@ -591,7 +596,7 @@ export function simulateMatch(input) {
     const c = [];
     for (const team of teams) for (const p of team.onPitch) {
       if (p === B.kicker && S.tick - B.kickTick < 6) continue;
-      const d = segDist(p, px, py), r0 = p.G === "GK" && inOwnBox(p) ? 1.3 : 0.85;
+      const d = segDist(p, px, py), r0 = p.G === "GK" && inOwnBox(p) ? 1.3 : B.lastTeam && p.team !== B.lastTeam ? 0.85 * (0.62 + 0.25 * p.a.tac + 0.25 * p.a.mar) : 0.85;
       if (d < r0) { const tr = B.tried[p.id]; if (tr === B.flight && (B.pass || B.shot)) continue; if (typeof tr === "number" && tr < 0 && S.tick + tr < 4) continue; c.push([d, p]); }
     }
     if (!c.length) return false;
@@ -731,7 +736,7 @@ export function simulateMatch(input) {
       if (d < 0.65) { sh.tried[o.id] = 1; const inWall = sh.wall && sh.wall.includes(o.id); if (R() < (inWall ? (B.z < 1.85 ? 0.85 : 0) : 0.42 + 0.3 * o.a.mar)) { block(o); return; } }
     }
     const gk = gkOf(dt); if (!gk || sh.tried[gk.id]) return;
-    const d = segDist(gk, px, py), reach = (gk.dive ? 1.45 : 0.85) * (0.85 + 0.3 * gk.a.gkr) + (gk.h - 1.85) * 0.5;
+    const d = segDist(gk, px, py), reach = (gk.dive ? 1.45 : 0.85) * (0.85 + 0.15 * gk.a.gkr + 0.15 * gk.a.gkd) + (gk.h - 1.85) * 0.5;
     if (d < reach && B.z < 2.55) { sh.tried[gk.id] = 1; saveAttempt(gk, d, reach); }
   }
   function block(o) {
@@ -904,7 +909,7 @@ export function simulateMatch(input) {
   }
   function keeperDistribute(gk) {
     const team = gk.team, tac = team.tac;
-    const short = R() < (tac.buildUp === "short" ? 0.8 : tac.buildUp === "mixed" ? 0.5 : 0.18) + 0.15 * (gk.a.gkd - 0.7);
+    const short = R() < (tac.buildUp === "short" ? 0.8 : tac.buildUp === "mixed" ? 0.5 : 0.18) + 0.15 * (gk.a.gks - 0.7);
     let target = null;
     if (short) { const c = team.onPitch.filter(q => (q.G === "DEF" || q.slot && q.slot.g === "DM") && pressureOn(q) < 0.4 && hyp(q.x - gk.x, q.y - gk.y) < 32).sort(byDist(gk.x, gk.y)); target = c[0] || null; }
     gk.hands = false;
@@ -912,7 +917,7 @@ export function simulateMatch(input) {
     const fwd = team.onPitch.filter(q => q.G === "FWD" || (q.slot && q.slot.g === "AM")).sort((a, b) => U(team, b.x) - U(team, a.x) || a.id - b.id);
     const r = fwd[floor(R() * min(2, fwd.length))] || team.onPitch.find(q => q !== gk);
     const tu = clamp(U(team, r.x), 40, 72), tv = clamp(V(team, r.y) + rr(-4, 4), 6, W - 6), pt = XY(team, tu, tv);
-    const err = (1.25 - gk.a.gkd) * 4 * WX.wind;
+    const err = (1.25 - gk.a.gks) * 4 * WX.wind;
     const t = launch(gk, pt.x + gauss() * err, pt.y + gauss() * err, { loft: true, T: 2.1 + rr(0, 0.4), z0: 1.0 });
     B.pass = { from: gk, to: r, kind: "long", tick: S.tick, loft: true }; r.recv = { x: pt.x, y: pt.y, until: S.tick + round(t / DT) + 8 }; team.stats.passes++; gk.st.passes++;
   }
