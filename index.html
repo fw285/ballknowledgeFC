@@ -581,7 +581,7 @@ const QUICK_STADIUMS = [{name:"Anfield",atmosphere:9,altitudeMeters:0,city:"Live
 const QUICK_STRENGTH = {even:{A:[82,90],B:[82,90]}, stronger:{A:[86,95],B:[76,84]}, weaker:{A:[76,84],B:[86,95]}, mixed:{A:[60,99],B:[60,99]}};
 function poolPlayer(pick, pos){
   const G2=GROUP(pos), rt=pick.rating;
-  return {name:pick.name, quick:true, positions:[pos], nationality:pick.nat, nationalTeam:pick.nat, clubs:pick.club?[pick.club]:[], retired:false, rating:rt,
+  return {name:pick.name, quick:true, noAI:true, positions:[pos], nationality:pick.nat, nationalTeam:pick.nat, clubs:pick.club?[pick.club]:[], retired:false, rating:rt,
     attack:G2==="FWD"?rt+2:G2==="MID"?rt-6:G2==="DEF"?rt-30:20, defense:G2==="DEF"?rt+2:G2==="MID"?rt-8:G2==="GK"?rt:rt-40,
     pace:clamp(rt+({W:3,ST:0,FB:0,AM:-2,CM:-6,DM:-8,CB:-8,GK:-10}[pos]||0)+Math.round(Math.random()*12-6),45,96), fiery:false};
 }
@@ -600,7 +600,7 @@ function setUpQuick(st, strength, myForm){
   st.squads={A:quickSquad(myForm, band.A, taken), B:quickSquad(st.players.B.formation, band.B, taken)};
   if(st.squads.B.manager.name===st.squads.A.manager.name) st.squads.B.manager={...rand(QUICK_MANAGERS.filter(m=>m.name!==st.squads.A.manager.name))};
   st.phase="prematch"; st.round=null; st.tac={A:{},B:{}};
-  st.pre={ready:{A:false,B:true}, level:st.pre?.level||"extended", levelBy:null, deadline:Date.now()+PREMATCH_MS, prep:"done"};
+  st.pre={ready:{A:false,B:true}, level:st.pre?.level||"extended", levelBy:null, deadline:Date.now()+PREMATCH_MS, prep:"pending"};
 }
 function spinMarker(why, tried){ return {spin:true, why, tried:tried||""}; }
 function buildSpins(st){
@@ -928,8 +928,16 @@ function backfillNeeds(st){
   return {need, mgrs};
 }
 async function backfillSquads(st){
-  const {need, mgrs} = backfillNeeds(st);
-  if((!need.length && !mgrs.length) || !sample) return 0;
+  const all = backfillNeeds(st);
+  if((!all.need.length && !all.mgrs.length) || !sample) return 0;
+  // batches of up to 7 players, run side by side; managers ride with the first batch
+  const batches=[]; for(let i=0;i<all.need.length;i+=7) batches.push({need:all.need.slice(i,i+7), mgrs:[]});
+  if(!batches.length) batches.push({need:[], mgrs:[]}); batches[0].mgrs=all.mgrs;
+  const counts = await Promise.all(batches.map(bt=>scoutBatch(st, bt.need, bt.mgrs)));
+  return counts.reduce((t,n)=>t+n,0);
+}
+async function scoutBatch(st, need, mgrs, retry){
+  if(!need.length && !mgrs.length) return 0;
   const prompt = `You are scouting for a football draft game. Players appear at their PRIME. ${RATING_SCALE}
 ${need.length?`PLAYERS: ${need.map((n,i)=>`${i}. ${n.name} (${n.role})`).join("; ")}`:"PLAYERS: none"}
 ${mgrs.length?`MANAGERS: ${mgrs.map((m,i)=>`${i}. ${m.name}`).join("; ")}`:"MANAGERS: none"}
@@ -938,8 +946,8 @@ For each manager: style (possession|pressing|counter|pragmatic|direct) and tacti
 Reply with only JSON:
 {"players":[{"i":0,"canonicalName":"Full Name","rating":85,"attack":70,"defense":60,"pace":75,"nationalTeam":"Country","clubs":["Club A"],"retired":false,"fiery":false,"positions":["CM"],"foot":"R","heightCm":180,"attrs":{"pac":75,"dri":80,"pas":85,"vis":84,"cro":70,"fin":68,"lon":74,"hea":55,"tac":66,"mar":64,"str":62,"sta":86,"agg":60,"com":85},"tags":["box-to-box"]}],"managers":[{"i":0,"style":"possession","tactics":{"press":8,"line":8,"width":7,"tempo":5,"mentality":7,"buildUp":"short","fullbacks":"inverted","counter":false},"trademark":"his signature idea in under 10 words"}]}`;
   try{
-    const res = await sample.json(prompt, {modelTier: need.length+mgrs.length>5 ? "default" : "quick", cache:false});
-    if(!res || typeof res!=="object") return 0;
+    const res = await sample.json(prompt, {modelTier:"quick", cache:false, timeoutMs:55000});
+    if(!res || typeof res!=="object") throw {code:"invalid_json"};
     let n=0;
     for(const o of (Array.isArray(res.players)?res.players:[])){ const it=need[o.i]; if(!it) continue; const sq=st.squads[it.p];
       const v = it.where.startsWith("sub") ? sq.subs[+it.where.slice(3)] : sq.slots[it.where];
@@ -953,8 +961,9 @@ Reply with only JSON:
     for(const o of (Array.isArray(res.managers)?res.managers:[])){ const it=mgrs[o.i]; if(!it) continue; const m=st.squads[it.p].manager;
       if(STYLE_TACTICS[o.style]) m.style=o.style; m.tactics=cleanTactics(o.tactics)||{...STYLE_TACTICS[m.style||"pragmatic"]}; if(o.trademark) m.trademark=String(o.trademark).slice(0,90); n++; }
     return n;
-  }catch(e){ console.warn("backfill",e); return 0; }
+  }catch(e){ console.warn("scouting",e); if(!retry && e && e.code!=="bad_code") return scoutBatch(st, need, mgrs, true); return 0; }
 }
+
 
 /* ============================================================
    Single player: Claude as the opponent
@@ -1096,7 +1105,8 @@ async function prepSquads(){
     const fresh = structuredClone((await gameRef.get()).data()); if(!fresh || fresh.phase!=="prematch") return;
     const n = await backfillSquads(fresh);
     await commit(st=>{ if(!st.pre || st.pre.prep==="done") return false;
-      if(n && st.phase==="prematch"){ for(const p of ["A","B"]){ st.squads[p]=fresh.squads[p]; } }
+      // keep the scouting even if kick-off was pressed meanwhile: the match is built from it
+      if(n && (st.phase==="prematch" || st.phase==="report")){ for(const p of ["A","B"]){ st.squads[p]=fresh.squads[p]; } }
       st.pre.prep="done"; });
   })().catch(e=>console.warn("prep",e)).finally(()=>{ prepRunning=null; });
   return prepRunning;
@@ -1341,12 +1351,13 @@ async function review(action){ if(!G?.round) return; await commit(M.resolve(G.ro
 async function runMatch(){
   if(!G || G.phase!=="prematch") return;
   try{ const l = await gameRef.acquire({holder:me.id, ttlMs:180000}); if(!l.acquired) return; }catch(e){}
-  const ok0 = await commit(st=>{ if(st.phase!=="prematch") return false; st.phase="report"; st.reportStartedAt=Date.now(); pushLog(st,"The teams are out. Simulating the match."); });
+  const ok0 = await commit(st=>{ if(st.phase!=="prematch") return false; st.phase="report"; st.reportStartedAt=Date.now(); pushLog(st, st.pre && st.pre.prep!=="done" ? "Finishing the scouting, then kick-off." : "The teams are out. Simulating the match."); });
   if(!ok0) return;
-  // give the background scouting a few more seconds, but never hold up kick-off for it:
-  // anyone still unscouted plays on stats estimated from his rating
-  if(prepRunning) await Promise.race([prepRunning, new Promise(r=>setTimeout(r, 8000))]);
-  const fresh = structuredClone((await gameRef.get()).data()); if(!fresh || fresh.phase!=="report") return;
+  // scouting decides how every player plays, so kick-off waits for it (it normally finishes during the team talk);
+  // if it stalls, anyone still unscouted plays on stats estimated from his rating
+  if(prepRunning) await Promise.race([prepRunning, new Promise(r=>setTimeout(r, 70000))]);
+  let fresh = structuredClone((await gameRef.get()).data()); if(!fresh || fresh.phase!=="report") return;
+  if(fresh.pre && fresh.pre.prep!=="done" && !prepRunning){ const n0=backfillNeeds(fresh); if(n0.need.length||n0.mgrs.length) await Promise.race([backfillSquads(fresh), new Promise(r=>setTimeout(r, 60000))]); }
   const seed = (Math.floor(Math.random()*2**31)>>>0) || 7;
   const tac = {A:teamTactics(fresh,"A"), B:teamTactics(fresh,"B")};
   const input = buildEngineInput(fresh, seed, tac);
@@ -1372,7 +1383,7 @@ async function rematch(){
     const keep={A:st.players.A, B:st.players.B};
     st.history=[...(st.history||[]), {final:st.match?.final, pens:st.match?.pens?{A:st.match.pens.A,B:st.match.pens.B}:null, winner:st.match?.winner}].slice(-10);
     delete st.match; delete st.tac; st.usedIds=[]; st.used={}; st.players=keep; st.log=[];
-    if(st.quick){ st.players.B.formation=rand(Object.keys(FORMATIONS)); setUpQuick(st, st.quick.strength, st.players.A.formation); pushLog(st,"New quick match: fresh random squads."); return; }
+    if(st.quick){ st.players.B.formation=rand(Object.keys(FORMATIONS)); setUpQuick(st, st.quick.strength, st.players.A.formation); pushLog(st,"New quick match: fresh random squads. Claude is scouting them."); return; }
     delete st.pre; pushLog(st,"Rematch! New draft, new dice.");
     startDraft(st);
   });
@@ -1440,7 +1451,7 @@ function lobbyHTML(){
       <div class="btnrow"><button class="btn red" id="createsolo" ${!db||!canWrite?"disabled":""}>Play Claude</button><span class="muted" style="align-self:center;font-size:13px">Same draft, same referee, same match engine. Claude picks in character.</span></div>
     </div>
     <details class="quick"><summary>Quick match: skip the draft</summary>
-      <p class="muted" style="margin:0 0 10px">Two random squads from the wheel's player pool, straight to the team talk. For testing tactics and the match engine.</p>
+      <p class="muted" style="margin:0 0 10px">Two random squads from the wheel's player pool, straight to the team talk. Claude scouts every player and manager just like in a drafted game, so it plays the same. For testing tactics and the match engine.</p>
       <div class="formrow">
         <div class="field"><label for="qstrength">Squads</label><select id="qstrength">${[["even","Evenly matched"],["stronger","Yours much stronger"],["weaker","Theirs much stronger"],["mixed","Completely random"]].map(([k,v])=>`<option value="${k}" ${(lsGet("dn_qstrength")||"even")===k?"selected":""}>${v}</option>`).join("")}</select></div>
         <label class="tog" style="align-self:end;padding-bottom:10px"><input type="checkbox" id="qclaude"> Claude dossier and commentary</label>
@@ -1732,7 +1743,7 @@ function prematchHTML(){
   const writing = G.phase==="report";
   if(writing || !G.pre) return `<section class="board"><div style="min-width:0"><div class="meta"><span>Kick-off</span></div>
     <div class="cat">${writing?"The teams are coming out":"Getting ready"}</div>
-    <div class="hint"><span class="spin"></span>&nbsp; Simulating the match. Kick-off in a few seconds.</div></div></section>
+    <div class="hint"><span class="spin"></span>&nbsp; ${G.pre && G.pre.prep!=="done" ? "Claude is finishing the scouting reports on every player, then the match is simulated. Usually under half a minute." : "Simulating the match. Kick-off in a few seconds."}</div></div></section>
     <div class="arena two">${teamHTML(mySeat||"A")}${teamHTML(other(mySeat||"A"))}</div>`;
   const left=mySeat||"A", right=other(left), lv=G.pre.level||"extended";
   const prepping = G.pre.prep!=="done";
@@ -1740,7 +1751,7 @@ function prematchHTML(){
   return `<section class="board"><div style="min-width:0"><div class="meta"><span>Team talk</span><span>·</span><span>${mySeat?(oppReady?esc(G.players[right].team)+" are ready":esc(G.players[right].team)+" are still setting up"):"Waiting for kick-off"}</span></div>
       <div class="cat">Set up your tactics</div>
       <div class="hint">Your manager starts you on his usual plan. Nudge it, then press Start match when you're both happy; it kicks off on both devices. A high line leaves space in behind, wing-backs stretch the pitch, a deep block invites pressure.${prepping?` <span style="opacity:.75"><span class="spin" style="width:14px;height:14px;border-width:2px"></span> Claude is scouting player attributes…</span>`:""}</div></div>
-      ${mySeat?`<div class="startbox"><button class="btn gold big" id="startmatch">Start match</button><span>${oppReady?"Both of you can start it":"Starts it for both of you"}</span></div>`:""}</section>
+      ${mySeat?`<div class="startbox"><button class="btn gold big" id="startmatch">Start match</button><span>${prepping?"Scouting still running: kick-off waits for it":oppReady?"Both of you can start it":"Starts it for both of you"}</span></div>`:""}</section>
     <section class="hlpick"><div><div class="eyebrow">Match highlights · both of you watch the same cut</div>
       <div class="seg big">${Object.entries(LEVELS).map(([k,v])=>`<button type="button" class="${lv===k?"sel":""}" data-level="${k}" ${mySeat?"":"disabled"}><b>${v.label}</b><span>about ${v.mins} min · ${v.note}</span></button>`).join("")}</div>
       ${G.pre.levelBy?`<div class="muted" style="font-size:12px;margin-top:6px">Chosen by ${esc(G.players[G.pre.levelBy].team)}. Either of you can change it.</div>`:""}</div></section>
