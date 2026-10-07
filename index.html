@@ -354,7 +354,7 @@ const FIREBASE_CONFIG = {
 };
 const API_URL = "/api/claude";
 /* Both devices must run the same version of the game. Bump this whenever the game logic changes. */
-const APP_VERSION = "2026-10-06d";
+const APP_VERSION = "2026-10-07a";
 
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { initializeFirestore, doc as fdoc, getDoc, setDoc, onSnapshot as fsnap, collection as fcol, query as fquery, orderBy as forder, limit as flimit, runTransaction } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -1088,7 +1088,7 @@ const minLabel = (sim, e) => { const c=e.clock||0; if(e.type==="ht") return "HT"
 const SAVED = new Set(["saved","caught","parried","tipped"]);
 // The moments worth a commentary line, in order.
 function feedWorthy(e){
-  if(e.type==="shot") return e.outcome!=="goal" && (e.big || SAVED.has(e.outcome) || e.outcome==="post" || e.outcome==="bar" || e.xg>=0.15);
+  if(e.type==="shot") return e.outcome!=="goal" && (e.big || SAVED.has(e.outcome) || e.outcome==="post" || e.outcome==="bar" || e.xg>=0.1);
   return ["goal","penalty","red","sub","aura","tactic","ht","ft","shootout","yellow"].includes(e.type) || (e.type==="kickoff" && e.tick===0);
 }
 function keyEventIdx(sim){ const out=[]; sim.events.forEach((e,i)=>{ if(feedWorthy(e) && e.type!=="yellow" && e.type!=="kickoff") out.push(i); }); return out.slice(0,45); }
