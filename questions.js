@@ -10,6 +10,9 @@
      old:1  needs a long career (never drawn on the "Youth only" roll)
      nat:1  about nationality (never drawn on the "No repeats" roll)
 
+   The nationality x club list (NAT_CLUB_QUESTIONS) works the same way;
+   its weight in QUESTION_MIX is natClubs.
+
    Keep the commas between lines and the brackets around each list.
    Save, commit, and Vercel puts the new version live in a minute.
    Claude referees every question, so plain English is fine.
@@ -184,8 +187,30 @@ export const NATIONS = ["Portugal","the Netherlands","Belgium","Croatia","Urugua
 // "Has played for both X and Y" questions.
 export const CLUB_PAIRS = [["Barcelona","Liverpool"],["Arsenal","Barcelona"],["Real Madrid","Manchester United"],["Chelsea","Real Madrid"],["Juventus","Real Madrid"],["AC Milan","Inter Milan"],["Bayern Munich","Borussia Dortmund"],["Paris Saint-Germain","Barcelona"],["Manchester City","Barcelona"],["Arsenal","Manchester City"],["Liverpool","Real Madrid"],["Tottenham","Real Madrid"],["Atlético Madrid","Chelsea"],["Ajax","Barcelona"],["Napoli","Juventus"],["Monaco","Real Madrid"]];
 
+// Nationality x club/league questions: a nationality and a club or league in one.
+// Roughly easy to brutal top to bottom; the hard ones have only a handful of answers.
+// "Englishman" etc. means he represents that country at senior level (or would, if uncapped).
+export const NAT_CLUB_QUESTIONS = [
+ {t:"A Spaniard who has played in the Premier League",h:"Represents Spain. Any club, any season.",nat:1},
+ {t:"A Frenchman who has played for Real Madrid",h:"Represents France. Any spell, loans count.",nat:1},
+ {t:"A Dutchman who has played for Barcelona",h:"Represents the Netherlands. Any spell, loans count.",nat:1},
+ {t:"A Brazilian who has played for AC Milan",h:"Represents Brazil. Any spell, loans count.",nat:1},
+ {t:"A German who has played in La Liga",h:"Represents Germany. Any club, any season.",nat:1},
+ {t:"An American who has played in the Bundesliga",h:"Represents the USA. Any club, any season.",nat:1},
+ {t:"A Mexican who has played in La Liga",h:"Represents Mexico. Any club, any season.",nat:1},
+ {t:"A Norwegian who has played for Manchester United",h:"Represents Norway. Any spell, loans count.",nat:1,old:1},
+ {t:"An Italian who has played for Chelsea",h:"Represents Italy. Any spell, loans count.",nat:1,old:1},
+ {t:"A South Korean who has played in the Premier League",h:"Represents South Korea. More of them than you'd think.",nat:1},
+ {t:"A Japanese player who has played in Serie A",h:"Represents Japan. Any club, any season.",nat:1,old:1},
+ {t:"An Englishman who has played for Inter Milan",h:"Represents England. Any spell. Only a few have done it.",nat:1,old:1},
+ {t:"A Welshman who has played in La Liga or Serie A",h:"Represents Wales. Any club, any season.",nat:1,old:1},
+ {t:"A Russian who has played in Ligue 1",h:"Represents Russia. Any club, any season. Deep cut.",nat:1,old:1},
+ {t:"An Australian who has played in Serie A",h:"Represents Australia. Any club, any season. Deep cut.",nat:1,old:1},
+ {t:"A Chinese player who has played for a Manchester club",h:"Represents China. United or City. Good luck.",nat:1,old:1}
+];
+
 // How often each kind of player question comes up (they're relative weights).
-export const QUESTION_MIX = { questions: 52, clubPairs: 16, clubs: 16, nations: 16 };
+export const QUESTION_MIX = { questions: 52, clubPairs: 16, clubs: 16, nations: 16, natClubs: 14 };
 
 // Manager round questions.
 export const MANAGER_QUESTIONS = [

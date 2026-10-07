@@ -435,12 +435,13 @@ const configured = !!FIREBASE_CONFIG.projectId;
          nat = nationality-based (clashes with "no repeats")
    ============================================================ */
 import { WHEEL_ODDS, WHEEL_POOL } from "./random-players.js";
-import { PLAYER_QUESTIONS, CLUBS, NATIONS, CLUB_PAIRS, QUESTION_MIX, MANAGER_QUESTIONS, STADIUM_QUESTIONS, AURA_QUESTIONS } from "./questions.js";
+import { PLAYER_QUESTIONS, CLUBS, NATIONS, CLUB_PAIRS, NAT_CLUB_QUESTIONS, QUESTION_MIX, MANAGER_QUESTIONS, STADIUM_QUESTIONS, AURA_QUESTIONS } from "./questions.js";
 const qid = t => String(t).toLowerCase().replace(/[^a-z0-9]+/g," ").trim().slice(0,80);
 const SPECIAL_CATS = PLAYER_QUESTIONS.map(c=>({...c, id:"s:"+qid(c.t)}));
 const PAIR_CATS = CLUB_PAIRS.map(([a,b])=>({t:`Has played for both ${a} and ${b}`, h:"Any spells, in either order. Loans count.", id:"p:"+a+"|"+b}));
 const CLUB_CATS = CLUBS.map(c=>({t:`Has played for ${c}`, h:"Any spell, any season. Loans count.", id:"c:"+c}));
 const NAT_CATS = NATIONS.map(n=>({t:`Represents ${n}`, h:"Senior national team. One cap is enough.", nat:1, id:"n:"+n}));
+const NATCLUB_CATS = (NAT_CLUB_QUESTIONS||[]).map(c=>({...c, nat:1, id:"x:"+qid(c.t)}));
 const MANAGER_CATS = MANAGER_QUESTIONS, STADIUM_CATS = STADIUM_QUESTIONS, AURA_CATS = AURA_QUESTIONS;
 const AURA_TRIGGERS = {
  comeback_late:"If trailing after 75', the team surges forward",
@@ -546,7 +547,7 @@ function drawPlayerCat(st, dice){
   const used = new Set(st.usedIds);
   const ok = c => !used.has(c.id) && catFits(c, dice);
   const mix = QUESTION_MIX||{};
-  let buckets = [[SPECIAL_CATS.filter(ok),mix.questions??52],[PAIR_CATS.filter(ok),mix.clubPairs??16],[CLUB_CATS.filter(ok),mix.clubs??16],[NAT_CATS.filter(ok),mix.nations??16]].filter(b=>b[0].length && b[1]>0);
+  let buckets = [[SPECIAL_CATS.filter(ok),mix.questions??52],[PAIR_CATS.filter(ok),mix.clubPairs??16],[CLUB_CATS.filter(ok),mix.clubs??16],[NAT_CATS.filter(ok),mix.nations??16],[NATCLUB_CATS.filter(ok),mix.natClubs??14]].filter(b=>b[0].length && b[1]>0);
   if(!buckets.length){ st.usedIds=[]; buckets=[[SPECIAL_CATS.filter(c=>catFits(c,dice)),1]]; }
   let r = Math.random()*buckets.reduce((s,b)=>s+b[1],0), pool=buckets[0][0];
   for(const b of buckets){ r-=b[1]; if(r<=0){ pool=b[0]; break; } }
