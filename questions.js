@@ -188,7 +188,7 @@ export const NATIONS = ["Portugal","the Netherlands","Belgium","Croatia","Urugua
 export const CLUB_PAIRS = [["Barcelona","Liverpool"],["Arsenal","Barcelona"],["Real Madrid","Manchester United"],["Chelsea","Real Madrid"],["Juventus","Real Madrid"],["AC Milan","Inter Milan"],["Bayern Munich","Borussia Dortmund"],["Paris Saint-Germain","Barcelona"],["Manchester City","Barcelona"],["Arsenal","Manchester City"],["Liverpool","Real Madrid"],["Tottenham","Real Madrid"],["Atlético Madrid","Chelsea"],["Ajax","Barcelona"],["Napoli","Juventus"],["Monaco","Real Madrid"]];
 
 // Nationality x club/league questions: a nationality and a club or league in one.
-// Roughly easy to brutal top to bottom; the hard ones have only a handful of answers.
+// Easy, medium and a few hard ones; the hard ones have only a handful of answers.
 // "Englishman" etc. means he represents that country at senior level (or would, if uncapped).
 export const NAT_CLUB_QUESTIONS = [
  {t:"A Spaniard who has played in the Premier League",h:"Represents Spain. Any club, any season.",nat:1},
@@ -204,9 +204,16 @@ export const NAT_CLUB_QUESTIONS = [
  {t:"A Japanese player who has played in Serie A",h:"Represents Japan. Any club, any season.",nat:1,old:1},
  {t:"An Englishman who has played for Inter Milan",h:"Represents England. Any spell. Only a few have done it.",nat:1,old:1},
  {t:"A Welshman who has played in La Liga or Serie A",h:"Represents Wales. Any club, any season.",nat:1,old:1},
- {t:"A Russian who has played in Ligue 1",h:"Represents Russia. Any club, any season. Deep cut.",nat:1,old:1},
- {t:"An Australian who has played in Serie A",h:"Represents Australia. Any club, any season. Deep cut.",nat:1,old:1},
- {t:"A Chinese player who has played for a Manchester club",h:"Represents China. United or City. Good luck.",nat:1,old:1}
+ {t:"An Argentine who has played in Serie A",h:"Represents Argentina. Any club, any season.",nat:1},
+ {t:"A Portuguese player who has played in the Premier League",h:"Represents Portugal. Any club, any season.",nat:1},
+ {t:"A Brazilian who has played for Barcelona",h:"Represents Brazil. Any spell, loans count.",nat:1},
+ {t:"A Frenchman who has played for Arsenal",h:"Represents France. Any spell, loans count.",nat:1},
+ {t:"A Belgian who has played for Chelsea",h:"Represents Belgium. Any spell, loans count.",nat:1},
+ {t:"An Englishman who has played in La Liga",h:"Represents England. Any club, any season.",nat:1},
+ {t:"A Croatian who has played in Serie A",h:"Represents Croatia. Any club, any season.",nat:1},
+ {t:"A Senegalese player who has played in the Premier League",h:"Represents Senegal. Any club, any season.",nat:1},
+ {t:"A Uruguayan who has played in La Liga",h:"Represents Uruguay. Any club, any season.",nat:1},
+ {t:"A Dane who has played in the Premier League",h:"Represents Denmark. Any club, any season.",nat:1}
 ];
 
 // How often each kind of player question comes up (they're relative weights).
