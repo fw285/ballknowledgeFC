@@ -369,7 +369,7 @@ const FIREBASE_CONFIG = {
 };
 const API_URL = "/api/claude";
 /* Both devices must run the same version of the game. Bump this whenever the game logic changes. */
-const APP_VERSION = "2026-10-08a";
+const APP_VERSION = "2026-10-09a";
 
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { initializeFirestore, doc as fdoc, getDoc, setDoc, onSnapshot as fsnap, collection as fcol, query as fquery, orderBy as forder, limit as flimit, runTransaction } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -1768,7 +1768,7 @@ function panelHTML(){
           : r.kind==="sub" ? `<p class="muted" style="margin:0">Any position. He goes on your bench.</p>` : "";
         body = `<h4>Your pick</h4>
           <form id="pickform" class="field" style="gap:10px" autocomplete="off">
-            <div class="field"><label for="pick">${lbl}</label><input id="pick" maxlength="60" placeholder="${r.kind==="stadium"?"e.g. Estadio Azteca":r.kind==="manager"?"e.g. Carlo Ancelotti":r.kind==="aura"?"e.g. Istanbul 2005":"Type a name"}" autofocus></div>
+            <div class="field"><label for="pick">${lbl}</label><input id="pick" maxlength="60" placeholder="${r.kind==="stadium"?"Type a stadium":r.kind==="manager"?"Type a manager":r.kind==="aura"?"Type a moment, chant or ritual":"Type a name"}" autofocus></div>
             ${slotNote}
             <div class="btnrow"><button class="btn gold" type="submit">Lock it in</button><button class="btn ghost" type="button" id="giveup" title="${r.kind==="starter"||r.kind==="sub"?"Skip this pick. The slot goes to the wheel after the player rounds.":"Skip this pick and take the booby prize."}">Give up</button>${canReroll(r)?(G.squads[mySeat].rerollUsed?`<span class="muted" style="font-size:12px;align-self:center">Question change used</span>`:`<button class="btn ghost" type="button" id="reroll" title="Swap this question for a new one. Once per game; your clock resets.">New question (1 left)</button>`):""}</div>
             <div id="pickerr" style="color:var(--red);font-size:13px" role="alert"></div>
