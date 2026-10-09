@@ -5,6 +5,8 @@
 //   ANTHROPIC_API_KEY or finnapikey  (required) your key from console.anthropic.com
 //   ACCESS_CODE or Access_code       (recommended) a password players type in the lobby
 //   MODEL_FAST         (optional) model for the referee's first look (no web search), default claude-sonnet-5-5
+//                      Also used for Claude's picks when you play against it and the pre-match dossier.
+//                      A fast, cheap model (e.g. claude-haiku-5-5) suits it: rulings come back quicker.
 //   MODEL_QUICK        (optional) model for referee rulings that need a web search, default claude-sonnet-5-5
 //   MODEL_DEFAULT      (optional) model for the match dossier/commentary, default claude-sonnet-5-5
 //   WEB_SEARCH         (optional) set to "off" to stop the referee looking things up
@@ -85,7 +87,7 @@ module.exports = async (req, res) => {
     const codeOk = !ACCESS() || given === ACCESS() || given.toLowerCase() === ACCESS().toLowerCase();
     if (wantTest && !codeOk) out.test = "Add &code=YOUR_ACCESS_CODE to the address to run the live test.";
     if (wantTest && codeOk && out.apiKeySet) {
-      for (const [label, model] of [["referee", MODEL_QUICK()], ["commentary", MODEL_DEFAULT()]]) {
+      for (const [label, model] of [["refereeFast", MODEL_FAST()], ["referee", MODEL_QUICK()], ["commentary", MODEL_DEFAULT()]]) {
         try {
           const { r, j } = await callClaude(model, 5, "Say ok.");
           out["test_" + label] = r.ok ? "ok" : `${r.status} ${(j.error && j.error.message) || "error"}`;

@@ -377,7 +377,7 @@ const FIREBASE_CONFIG = {
 };
 const API_URL = "/api/claude";
 /* Both devices must run the same version of the game. Bump this whenever the game logic changes. */
-const APP_VERSION = "2026-10-09d";
+const APP_VERSION = "2026-10-09e";
 
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { initializeFirestore, doc as fdoc, getDoc, setDoc, onSnapshot as fsnap, collection as fcol, query as fquery, orderBy as forder, limit as flimit, runTransaction } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -1092,12 +1092,14 @@ async function runPracticeReview(){
   const todo=rvTodo(); if(!todo.length) return;
   rvBusy=true;
   try{
-    // questions about right now get a web search, so they go two at a time; the rest three at a time
+    // small batches (two questions; one if it needs a web search) and only two calls at a time:
+    // firing them all at once blew through the API key's per-minute limit and most came back empty
     const now=todo.filter(i=>G.qlog[i].now), rest=todo.filter(i=>!G.qlog[i].now), batches=[];
-    for(let i=0;i<rest.length;i+=3) batches.push(rest.slice(i,i+3));
-    for(let i=0;i<now.length;i+=2) batches.push(now.slice(i,i+2));
+    for(let i=0;i<rest.length;i+=2) batches.push(rest.slice(i,i+2));
+    for(const i of now) batches.push([i]);
     const gid=G.id, qlog=G.qlog;
-    await Promise.all(batches.map((b,k)=>new Promise(r=>setTimeout(r,k*500)).then(()=>reviewBatch(gid, qlog, b))));
+    const worker = async () => { while(batches.length){ if(G?.id!==gid || G.phase!=="practice") return; await reviewBatch(gid, qlog, batches.shift()); } };
+    await Promise.all([worker(), new Promise(r=>setTimeout(r,700)).then(worker)]);
   } finally { rvBusy=false; }
 }
 async function reviewBatch(gid, qlog, idx){
@@ -1118,12 +1120,18 @@ QUESTIONS:
 ${lines}
 
 Reply with only JSON, compactly on one line: {"items":[{"i":${qs[0].i},"verdict":"...","answers":[{"name":"...","why":"..."}]}]} with one item per question, using its number as "i".`;
-  let res=null;
-  for(let a=0; a<2 && !(res && Array.isArray(res.items)); a++){ try{ res = await sample.json(prompt, {modelTier:"default", cache:false, search, timeoutMs:58000}); }catch(e){ console.warn("practice review", e); } }
+  let res=null, why="";
+  for(let a=0; a<4 && !(res && Array.isArray(res.items)); a++){
+    if(a) await new Promise(r=>setTimeout(r, why==="rate_limited" ? 15000*a : 3000*a));   // back off, longer if the key is rate limited
+    try{ res = await sample.json(prompt, {modelTier:"default", cache:false, search, timeoutMs:58000}); why = res && Array.isArray(res.items) ? "" : "no items in the reply"; }
+    catch(e){ console.warn("practice review", e); why = (e && e.code) || "error"; res=null; }
+  }
+  const got = res && Array.isArray(res.items) ? res.items : [];
   const out={};
-  for(const {i} of qs){
-    const it = res && Array.isArray(res.items) ? res.items.find(x=>Number(x.i)===i) : null;
-    out[i] = it ? {...(qlog[i].ok===null && typeof it.correct==="boolean" ? {correct:it.correct} : {}), verdict:String(it.verdict||"").slice(0,400), answers:(Array.isArray(it.answers)?it.answers:[]).slice(0,6).map(a=>({name:String(a?.name||"").slice(0,60), why:String(a?.why||"").slice(0,360)})).filter(a=>a.name)} : {err:1};
+  for(const [k,{i}] of qs.entries()){
+    // match by number; if Claude renumbered them, fall back to the order they came back in
+    const it = got.find(x=>Number(x?.i)===i) || (got.length===qs.length && !got.some(x=>qs.some(y=>Number(x?.i)===y.i)) ? got[k] : null);
+    out[i] = it ? {...(qlog[i].ok===null && typeof it.correct==="boolean" ? {correct:it.correct} : {}), verdict:String(it.verdict||"").slice(0,400), answers:(Array.isArray(it.answers)?it.answers:[]).slice(0,6).map(a=>({name:String(a?.name||"").slice(0,60), why:String(a?.why||"").slice(0,360)})).filter(a=>a.name)} : {err:1, why: why || "missing from the reply"};
   }
   await commit(st=>{ if(st.id!==gid || st.phase!=="practice") return false; st.review=st.review||{items:{}}; st.review.items={...(st.review.items||{}), ...out}; });
 }
@@ -1179,7 +1187,7 @@ function practiceHTML(){
     const ok = okOf(q,i), late = q.ok===null ? " (Claude's call)" : "";
     const mark = !q.pick ? `<span class="mark skip">${q.how==="timeout"?"Out of time":"Gave up"}</span>` : ok===null ? `<span class="mark skip">Checking…</span>` : ok ? `<span class="mark ok">✓ Correct${late}</span>` : `<span class="mark no">✕ Wrong${late}</span>`;
     const body = !it ? `<div class="muted"><span class="spin"></span> Claude is going through this one…</div>`
-      : it.err ? `<div class="muted">Claude couldn't write this one.</div>`
+      : it.err ? `<div class="muted">Claude couldn't write this one${it.why?` (${esc(it.why==="rate_limited"?"the API key hit its per-minute limit":it.why==="timeout"?"it took too long":it.why)})`:""}. Use Try again above.</div>`
       : `${it.verdict?`<div>${esc(it.verdict)}</div>`:""}${it.answers.length?`<div class="eyebrow">${q.pick&&q.ok?"Other great answers":"You could have had"}</div><ul class="rvmiss">${it.answers.map(a=>`<li><b>${esc(a.name)}</b> <span>${esc(a.why)}</span></li>`).join("")}</ul>`:""}`;
     return `<div class="rvcard"><div class="meta">${i+1} · ${esc(kindLbl(q))}${rule?` · ${esc(d.n)}`:""}</div>
       <div class="q">${esc(q.t)}</div><div class="muted" style="font-size:13px">${esc(q.h)}${rule?` · ${esc(d.d)}`:""}</div>
