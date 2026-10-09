@@ -175,17 +175,94 @@ export const PLAYER_QUESTIONS = [
  {t:"Has scored at a World Cup after coming off the bench",h:"Any World Cup, shootouts don't count."},
  {t:"Scored 20+ league goals in a season aged 33 or older",h:"Age at the start of that season.",old:1},
  {t:"Is English and currently plays abroad",h:"Any club outside England.",nat:1},
- {t:"Is currently on loan",h:"This season."}
+ {t:"Is currently on loan",h:"This season."},
+ // October 2026 batch: ratings, tournaments, famous nights, names, numbers, careers
+ {t:"Is an Icon in Ultimate Team",h:"A retired legend with an Icon card in any FIFA or EA FC edition.",old:1},
+ {t:"Was the highest-rated player in a FIFA or EA FC edition",h:"Top of the ratings that year. Shared counts."},
+ {t:"Had a FIFA or EA FC card rated under 65 and later one rated 85 or higher",h:"The late bloomers and the glow-ups."},
+ {t:"Is a goalkeeper with a FIFA or EA FC base card rated 88 or higher",h:"Any edition. Base card, not promos."},
+ {t:"Has 90 or more shooting on his EA FC 27 base card",h:"Base gold card, not promos."},
+ {t:"Has 88 or more passing on his EA FC 27 base card",h:"Base gold card, not promos."},
+ {t:"Has 88 or more defending on his EA FC 27 base card",h:"Base gold card, not promos."},
+ {t:"Has been on the cover of Pro Evolution Soccer or eFootball",h:"Any edition, any region."},
+ {t:"Played at Euro 2024",h:"At least one appearance in Germany."},
+ {t:"Scored at Euro 2024",h:"Shootouts don't count."},
+ {t:"Played in the Euro 2024 final",h:"Spain v England in Berlin. Starter or sub."},
+ {t:"Was named in UEFA's Euro 2024 Team of the Tournament",h:"The official team of the tournament."},
+ {t:"Played at Euro 2024 for Georgia, Albania, Slovakia, Slovenia, Romania or Hungary",h:"Any minutes for any of the six.",nat:1},
+ {t:"Has scored for England at a World Cup or Euros",h:"Any edition. Shootouts don't count.",nat:1},
+ {t:"Played for the USA, Mexico or Canada at the 2026 World Cup",h:"The three hosts. At least one appearance.",nat:1},
+ {t:"Played for a World Cup debutant in 2026",h:"Uzbekistan, Jordan, Cape Verde or Curaçao.",nat:1},
+ {t:"Played at both Euro 2024 and the 2026 World Cup",h:"At least one appearance at each."},
+ {t:"Played at the 2026 World Cup aged 35 or older",h:"His age on the day.",old:1},
+ {t:"Played at the 2026 World Cup for an African nation",h:"Morocco, Senegal, Egypt, Ivory Coast...",nat:1},
+ {t:"Scored at the 2026 World Cup while at a Premier League club",h:"His club at the time of the tournament."},
+ {t:"Played in the 2005 Champions League final",h:"Liverpool v Milan in Istanbul. Starter or sub.",old:1},
+ {t:"Played in Barcelona's 6-1 win over PSG in 2017",h:"La Remontada. Either side counts.",old:1},
+ {t:"Played in Liverpool's 4-0 win over Barcelona in 2019",h:"The Anfield comeback. Either side counts.",old:1},
+ {t:"Played in Germany's 7-1 win over Brazil in 2014",h:"Either side counts.",old:1},
+ {t:"Was in Leicester City's 2015-16 title-winning squad",h:"At least one league appearance that season.",old:1},
+ {t:"Was one of Arsenal's 2003-04 Invincibles",h:"At least one league appearance that season.",old:1},
+ {t:"Played in Manchester United's 1999 Champions League final win",h:"Bayern at the Camp Nou. Starter or sub.",old:1},
+ {t:"Has won the Puskás Award",h:"FIFA's goal of the year."},
+ {t:"Has been sent off in a Champions League or World Cup final",h:"A red card in the final itself.",old:1},
+ {t:"Scored in a Champions League final penalty shootout",h:"He scored his kick."},
+ {t:"Is famous for a controversial handball",h:"Subjective, but it has to be a well-known incident."},
+ {t:"Scored in a Champions League final after coming off the bench",h:"Any final. Shootouts don't count."},
+ {t:"His surname starts with Z",h:"As he's commonly known: Zidane, Zola, Zaha..."},
+ {t:"His surname has a double letter",h:"Bellingham, Kroos, Müller, Mbappé..."},
+ {t:"His surname is also an everyday English word",h:"Rice, Stones, Walker, Young, Hart..."},
+ {t:"His shirt name has an accent or a special letter",h:"Mbappé, Ødegaard, Modrić, Gündoğan..."},
+ {t:"His first name is Mohamed, Mohammed or Muhammad",h:"Any spelling."},
+ {t:"His first name is João",h:"Félix, Cancelo, Neves, Palhinha..."},
+ {t:"His surname is three letters or fewer",h:"As he's commonly known: Son, Kim, Can..."},
+ {t:"Has scored 40 or more goals in one season",h:"All competitions, club football."},
+ {t:"Has scored 200 or more club goals",h:"Career total, all competitions.",old:1},
+ {t:"Has 100 or more caps for his country",h:"Senior internationals.",old:1},
+ {t:"Has won the Premier League Golden Boot",h:"Outright or shared."},
+ {t:"Has won the Champions League three or more times",h:"In the winning squad."},
+ {t:"Has won the Premier League Golden Glove or the Zamora Trophy",h:"The goalkeeping awards in England and Spain."},
+ {t:"Has kept 20 or more clean sheets in a top-five league season",h:"League games only."},
+ {t:"Has scored a hat-trick inside ten minutes",h:"Any competitive match, three goals within ten minutes."},
+ {t:"Has scored at three or more World Cups",h:"Different tournaments, not three goals.",old:1},
+ {t:"Has played at four or more World Cups",h:"At least one appearance at each.",old:1},
+ {t:"Has won the World Cup Golden Ball",h:"Player of the tournament."},
+ {t:"Has won the Ballon d'Or",h:"Any year."},
+ {t:"Has played in MLS",h:"Any club, any season."},
+ {t:"Has played in both the Eredivisie and the Premier League",h:"At least one league game in each."},
+ {t:"Has played in both Portugal's top flight and La Liga",h:"At least one league game in each."},
+ {t:"Has played for three or more Premier League clubs",h:"Loans count."},
+ {t:"Has played under Antonio Conte",h:"Any club or national team."},
+ {t:"Has played under Thomas Tuchel",h:"Any club or national team."},
+ {t:"Has played under Mikel Arteta",h:"Arsenal."},
+ {t:"Has been a club teammate of Zlatan Ibrahimović",h:"Any of his clubs."},
+ {t:"Has been a club teammate of Neymar",h:"Santos, Barcelona, PSG or Al-Hilal."},
+ {t:"Has been a club teammate of Lamine Yamal",h:"Barcelona."},
+ {t:"Has been loaned out by Chelsea",h:"The famous loan army."},
+ {t:"Came through Manchester United's or Real Madrid's academy",h:"Their youth system, then a senior career."},
+ {t:"Came through Southampton's academy",h:"Their youth system, then a senior career."},
+ {t:"Has won the Bundesliga with a club other than Bayern",h:"In the title-winning squad."},
+ {t:"Has won La Liga with a club other than Real Madrid or Barcelona",h:"In the title-winning squad."},
+ {t:"Has won Ligue 1 with a club other than PSG",h:"In the title-winning squad."},
+ {t:"Has won the Premier League with a club outside the big six",h:"In the title-winning squad. A very short list of clubs.",old:1},
+ {t:"Has won a domestic double",h:"League title and the main domestic cup in the same season."},
+ {t:"Has played in goal in a competitive match as an outfield player",h:"Moved into goal or came on as the emergency keeper."},
+ {t:"Has a twin brother who also played professionally",h:"De Boer, Bender, Da Silva..."},
+ {t:"Retired from club football, then came back to play again",h:"Not just an international retirement.",old:1},
+ {t:"Became the manager of a top-five-league club after retiring",h:"Head coach, not caretaker.",old:1},
+ {t:"Has a nickname after an animal",h:"Widely used: El Toro, the Spider, Pitbull..."},
+ {t:"Plays for a club in this season's Europa League",h:"League phase or later."},
+ {t:"Has scored in this season's Champions League",h:"League phase or later. Qualifiers don't count."}
 ];
 
 // "Has played for X" questions, one per club in this list.
-export const CLUBS = ["Real Madrid","Barcelona","Atlético Madrid","Sevilla","Valencia","Villarreal","Bayern Munich","Borussia Dortmund","Bayer Leverkusen","RB Leipzig","Wolfsburg","Juventus","AC Milan","Inter Milan","Roma","Napoli","Lazio","Fiorentina","Paris Saint-Germain","Marseille","Lyon","Monaco","Manchester United","Manchester City","Liverpool","Arsenal","Chelsea","Tottenham","Aston Villa","Everton","Newcastle United","Ajax","PSV","Benfica","Porto","Sporting CP","Celtic","Galatasaray","Inter Miami","Al-Nassr or Al-Hilal"];
+export const CLUBS = ["Real Madrid","Barcelona","Atlético Madrid","Sevilla","Valencia","Villarreal","Bayern Munich","Borussia Dortmund","Bayer Leverkusen","RB Leipzig","Wolfsburg","Juventus","AC Milan","Inter Milan","Roma","Napoli","Lazio","Fiorentina","Paris Saint-Germain","Marseille","Lyon","Monaco","Manchester United","Manchester City","Liverpool","Arsenal","Chelsea","Tottenham","Aston Villa","Everton","Newcastle United","Ajax","PSV","Benfica","Porto","Sporting CP","Celtic","Galatasaray","Inter Miami","Al-Nassr or Al-Hilal","West Ham United","Leicester City","Feyenoord","Schalke 04","Fenerbahçe"];
 
 // "Represents X" questions, one per country in this list.
-export const NATIONS = ["Portugal","the Netherlands","Belgium","Croatia","Uruguay","Colombia","Senegal","Nigeria","Japan","the USA","Norway","Denmark","Morocco","Mexico","Ivory Coast","Scotland","Wales","Serbia","Switzerland","Poland","Austria","South Korea","Egypt","Ghana","Cameroon","Sweden","Turkey","Chile","Algeria","Ecuador","Brazil","Argentina","France","England","Spain","Germany","Italy"];
+export const NATIONS = ["Portugal","the Netherlands","Belgium","Croatia","Uruguay","Colombia","Senegal","Nigeria","Japan","the USA","Norway","Denmark","Morocco","Mexico","Ivory Coast","Scotland","Wales","Serbia","Switzerland","Poland","Austria","South Korea","Egypt","Ghana","Cameroon","Sweden","Turkey","Chile","Algeria","Ecuador","Brazil","Argentina","France","England","Spain","Germany","Italy","the Republic of Ireland","Iceland","Australia","Canada","Georgia"];
 
 // "Has played for both X and Y" questions.
-export const CLUB_PAIRS = [["Barcelona","Liverpool"],["Arsenal","Barcelona"],["Real Madrid","Manchester United"],["Chelsea","Real Madrid"],["Juventus","Real Madrid"],["AC Milan","Inter Milan"],["Bayern Munich","Borussia Dortmund"],["Paris Saint-Germain","Barcelona"],["Manchester City","Barcelona"],["Arsenal","Manchester City"],["Liverpool","Real Madrid"],["Tottenham","Real Madrid"],["Atlético Madrid","Chelsea"],["Ajax","Barcelona"],["Napoli","Juventus"],["Monaco","Real Madrid"]];
+export const CLUB_PAIRS = [["Barcelona","Liverpool"],["Arsenal","Barcelona"],["Real Madrid","Manchester United"],["Chelsea","Real Madrid"],["Juventus","Real Madrid"],["AC Milan","Inter Milan"],["Bayern Munich","Borussia Dortmund"],["Paris Saint-Germain","Barcelona"],["Manchester City","Barcelona"],["Arsenal","Manchester City"],["Liverpool","Real Madrid"],["Tottenham","Real Madrid"],["Atlético Madrid","Chelsea"],["Ajax","Barcelona"],["Napoli","Juventus"],["Monaco","Real Madrid"],["Real Madrid","Inter Milan"],["Barcelona","Inter Milan"],["Chelsea","AC Milan"],["Arsenal","Juventus"],["Liverpool","Chelsea"],["Manchester United","Juventus"],["Tottenham","Manchester United"],["Bayern Munich","Real Madrid"],["Paris Saint-Germain","AC Milan"],["Atlético Madrid","Barcelona"],["Everton","Manchester United"],["Ajax","Inter Milan"]];
 
 // Nationality x club/league questions: a nationality and a club or league in one.
 // Easy, medium and a few hard ones; the hard ones have only a handful of answers.
@@ -213,7 +290,27 @@ export const NAT_CLUB_QUESTIONS = [
  {t:"A Croatian who has played in Serie A",h:"Represents Croatia. Any club, any season.",nat:1},
  {t:"A Senegalese player who has played in the Premier League",h:"Represents Senegal. Any club, any season.",nat:1},
  {t:"A Uruguayan who has played in La Liga",h:"Represents Uruguay. Any club, any season.",nat:1},
- {t:"A Dane who has played in the Premier League",h:"Represents Denmark. Any club, any season.",nat:1}
+ {t:"A Dane who has played in the Premier League",h:"Represents Denmark. Any club, any season.",nat:1},
+ {t:"A Brazilian who has played for Real Madrid",h:"Represents Brazil. Any spell, loans count.",nat:1},
+ {t:"An Argentine who has played for Inter Milan",h:"Represents Argentina. Any spell, loans count.",nat:1},
+ {t:"A Frenchman who has played for Juventus",h:"Represents France. Any spell, loans count.",nat:1},
+ {t:"A Dutchman who has played for AC Milan",h:"Represents the Netherlands. Any spell, loans count.",nat:1},
+ {t:"A Spaniard who has played in Serie A",h:"Represents Spain. Any club, any season.",nat:1},
+ {t:"A Portuguese player who has played in Serie A",h:"Represents Portugal. Any club, any season.",nat:1},
+ {t:"A German who has played in the Premier League",h:"Represents Germany. Any club, any season.",nat:1},
+ {t:"An Italian who has played in La Liga",h:"Represents Italy. Any club, any season.",nat:1},
+ {t:"An Englishman who has played in the Bundesliga",h:"Represents England. Any club, any season.",nat:1},
+ {t:"A Belgian who has played in Serie A",h:"Represents Belgium. Any club, any season.",nat:1},
+ {t:"A Croatian who has played for Real Madrid",h:"Represents Croatia. Any spell, loans count.",nat:1},
+ {t:"A Serbian who has played in Serie A",h:"Represents Serbia. Any club, any season.",nat:1},
+ {t:"A Moroccan who has played in La Liga",h:"Represents Morocco. Any club, any season.",nat:1},
+ {t:"A Colombian who has played in the Premier League",h:"Represents Colombia. Any club, any season.",nat:1},
+ {t:"A Japanese player who has played in the Bundesliga",h:"Represents Japan. Any club, any season.",nat:1},
+ {t:"A Swede who has played in Serie A",h:"Represents Sweden. Any club, any season.",nat:1},
+ {t:"A Nigerian who has played in Serie A",h:"Represents Nigeria. Any club, any season.",nat:1},
+ {t:"An Ivorian who has played in the Premier League",h:"Represents Ivory Coast. Any club, any season.",nat:1},
+ {t:"A Scot who has played in Serie A",h:"Represents Scotland. Any club, any season.",nat:1},
+ {t:"An American who has played in Serie A",h:"Represents the USA. Any club, any season.",nat:1}
 ];
 
 // How often each kind of player question comes up (they're relative weights).

@@ -72,6 +72,13 @@ In Vercel: your project → **Settings → Domains** → add your domain, then f
 
 Send your friend the link and the access code. Each of you enters a team name and the access code in the lobby. One of you presses **Create a game**, and the other presses **Join** on it in the list. No accounts, no permission prompts.
 
+Other modes in the lobby:
+- **Play Claude**: the same draft and match against Claude, on Easy, Medium or Hard.
+- **Practice draft**: just you and the questions, with no opponent and no match. At the end Claude goes through every question with you: a word on your answer, then the players you could have picked and a line or two on each.
+- **Quick match**: skip the draft and go straight to a match between two random squads, for testing tactics.
+
+Each device remembers the last ~140 questions it has seen, and new games skip them, so the same ones don't keep coming back.
+
 ---
 
 ## Troubleshooting
