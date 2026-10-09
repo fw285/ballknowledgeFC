@@ -369,7 +369,7 @@ const FIREBASE_CONFIG = {
 };
 const API_URL = "/api/claude";
 /* Both devices must run the same version of the game. Bump this whenever the game logic changes. */
-const APP_VERSION = "2026-10-09a";
+const APP_VERSION = "2026-10-09b";
 
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { initializeFirestore, doc as fdoc, getDoc, setDoc, onSnapshot as fsnap, collection as fcol, query as fquery, orderBy as forder, limit as flimit, runTransaction } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -717,11 +717,12 @@ function cleanTactics(t){
 function noteAnswer(st, p, pick, ok, reason, how, slot){
   const r=st.round; if(!st.practice || p!=="A" || !r || r.kind==="captain") return;
   const c=turnCat(r);
-  (st.qlog=st.qlog||[]).push({kind:r.kind, t:c.t, h:c.h||"", dice:r.dice||null, now:!!(c.cur || /currently|right now|this season|on loan|EA FC 27|2026/i.test(c.t||"")), pick:pick||null, ok:!!ok, reason:String(reason||"").slice(0,300), how, slot:slot||null});
+  (st.qlog=st.qlog||[]).push({kind:r.kind, t:c.t, h:c.h||"", dice:r.dice||null, now:!!(c.cur || /currently|right now|this season|on loan|EA FC 27|2026/i.test(c.t||"")), pick:pick||null, ok: ok===null ? null : !!ok, reason:String(reason||"").slice(0,300), how, slot:slot||null});
 }
 function placeResult(st, p, turn, kind, final, ruling, pending){
   const sq = st.squads[p], team = st.players[p].team, r=st.round;
-  noteAnswer(st, p, (final && ruling?.canonicalName) || pending.name, final, ruling && ruling.ai ? ruling.reason : "", final?"valid":"wrong", pending.slot);
+  const ruled = !!(ruling && ruling.ai);
+  noteAnswer(st, p, (final && ruling?.canonicalName) || pending.name, ruled ? final : null, ruled ? ruling.reason : "", ruled ? (final?"valid":"wrong") : "unruled", pending.slot);
   const ai = !!(ruling && ruling.ai && ruling.rating);
   if(kind==="starter"||kind==="sub"){
     const g = kind==="sub" ? "CM" : slotInfo(sq, pending.slot).g;
@@ -787,8 +788,10 @@ const M = {
     st.refOk = st.refOk||{};
     if(PERMANENT.has(code)) st.refOk[failedSeat]=false;
     const tried = r.pending.tried||[]; tried.push(failedSeat); r.pending.tried=tried;
-    const next = ["A","B"].find(s=>!tried.includes(s) && st.refOk[s]!==false && !(st.solo && s==="B"));
-    if(next){ r.pending.judge=next; r.pending.at=Date.now(); pushLog(st, `Ref handed to ${st.players[next].team}'s device.`); }
+    let next = ["A","B"].find(s=>!tried.includes(s) && st.refOk[s]!==false && !(st.solo && s==="B"));
+    // against Claude or in practice there's no other device to hand to: the ref has one more go instead
+    if(!next && st.solo && tried.length<2 && !PERMANENT.has(code)) next = "A";
+    if(next){ r.pending.judge=next; r.pending.at=Date.now(); pushLog(st, next===failedSeat ? "The ref is having another look." : `Ref handed to ${st.players[next].team}'s device.`); }
     else { r.pending.ruling=null; r.step="review"; r.reviewDeadline=Date.now()+REVIEW_MS; }
   };},
   setRuling(key, ruling, bySeat){ return st=>{
@@ -1092,7 +1095,9 @@ async function runPracticeReview(){
 async function reviewBatch(gid, qlog, idx){
   const qs=idx.map(i=>({i, q:qlog[i]})), search=qs.some(x=>x.q.now);
   const lines = qs.map(({i,q})=>{ const rule=rvRule(q);
-    const ans = q.pick ? `The fan answered "${q.pick}", which was ruled ${q.ok?"CORRECT":"WRONG"}${q.reason?` (referee: ${q.reason})`:""}.` : `The fan had no answer (${q.how==="timeout"?"ran out of time":"gave up"}).`;
+    const ans = !q.pick ? `The fan had no answer (${q.how==="timeout"?"ran out of time":"gave up"}).`
+      : q.ok===null ? `The fan answered "${q.pick}". The referee couldn't rule on it, so YOU decide: set "correct" to true or false for this question, and say why in the verdict.`
+      : `The fan answered "${q.pick}", which was ruled ${q.ok?"CORRECT":"WRONG"}${q.reason?` (referee: ${q.reason})`:""}.`;
     return `${i}. Pick ${RV_KIND[q.kind]||"a player"}: "${q.t}" (${q.h})${rule?`\n   Extra rule this round: ${rule}`:""}\n   ${ans}`; }).join("\n");
   const prompt = `You're a friendly, sharp football expert going through a practice draft with a fan, question by question, to help them build their ball knowledge. Everyone counts at their prime; retired players are fine unless a rule says otherwise.
 
@@ -1110,7 +1115,7 @@ Reply with only JSON, compactly on one line: {"items":[{"i":${qs[0].i},"verdict"
   const out={};
   for(const {i} of qs){
     const it = res && Array.isArray(res.items) ? res.items.find(x=>Number(x.i)===i) : null;
-    out[i] = it ? {verdict:String(it.verdict||"").slice(0,400), answers:(Array.isArray(it.answers)?it.answers:[]).slice(0,6).map(a=>({name:String(a?.name||"").slice(0,60), why:String(a?.why||"").slice(0,360)})).filter(a=>a.name)} : {err:1};
+    out[i] = it ? {...(qlog[i].ok===null && typeof it.correct==="boolean" ? {correct:it.correct} : {}), verdict:String(it.verdict||"").slice(0,400), answers:(Array.isArray(it.answers)?it.answers:[]).slice(0,6).map(a=>({name:String(a?.name||"").slice(0,60), why:String(a?.why||"").slice(0,360)})).filter(a=>a.name)} : {err:1};
   }
   await commit(st=>{ if(st.id!==gid || st.phase!=="practice") return false; st.review=st.review||{items:{}}; st.review.items={...(st.review.items||{}), ...out}; });
 }
@@ -1119,16 +1124,18 @@ async function retryPracticeReview(){
 }
 function practiceHTML(){
   const ql=G.qlog||[], items=G.review?.items||{}, done=ql.filter((q,i)=>items[i]&&!items[i].err).length, errs=ql.filter((q,i)=>items[i]&&items[i].err).length;
-  const right=ql.filter(q=>q.ok).length, mine=mySeat==="A";
+  const okOf = (q,i) => q.ok===null ? (items[i] && typeof items[i].correct==="boolean" ? items[i].correct : null) : q.ok;
+  const right=ql.filter((q,i)=>okOf(q,i)===true).length, open=ql.filter((q,i)=>okOf(q,i)===null && q.pick).length, mine=mySeat==="A";
   const kindLbl = q => q.kind==="starter" ? `Starter${q.slot?" · "+q.slot:""}` : q.kind==="sub" ? "Bench" : {manager:"Manager",stadium:"Stadium",aura:"Aura"}[q.kind]||"";
   const cards = ql.map((q,i)=>{ const it=items[i], d=q.dice&&DICE[q.dice], rule=rvRule(q);
-    const mark = q.pick ? (q.ok?`<span class="mark ok">✓ Correct</span>`:`<span class="mark no">✕ Wrong</span>`) : `<span class="mark skip">${q.how==="timeout"?"Out of time":"Gave up"}</span>`;
+    const ok = okOf(q,i), late = q.ok===null ? " (Claude's call)" : "";
+    const mark = !q.pick ? `<span class="mark skip">${q.how==="timeout"?"Out of time":"Gave up"}</span>` : ok===null ? `<span class="mark skip">Checking…</span>` : ok ? `<span class="mark ok">✓ Correct${late}</span>` : `<span class="mark no">✕ Wrong${late}</span>`;
     const body = !it ? `<div class="muted"><span class="spin"></span> Claude is going through this one…</div>`
       : it.err ? `<div class="muted">Claude couldn't write this one.</div>`
       : `${it.verdict?`<div>${esc(it.verdict)}</div>`:""}${it.answers.length?`<div class="eyebrow">${q.pick&&q.ok?"Other great answers":"You could have had"}</div><ul class="rvmiss">${it.answers.map(a=>`<li><b>${esc(a.name)}</b> <span>${esc(a.why)}</span></li>`).join("")}</ul>`:""}`;
     return `<div class="rvcard"><div class="meta">${i+1} · ${esc(kindLbl(q))}${rule?` · ${esc(d.n)}`:""}</div>
       <div class="q">${esc(q.t)}</div><div class="muted" style="font-size:13px">${esc(q.h)}${rule?` · ${esc(d.d)}`:""}</div>
-      <div class="rvans">${mark}<b>${esc(q.pick||"No answer")}</b>${q.pick&&!q.ok&&q.reason?`<span class="muted" style="font-size:13px">${esc(q.reason)}</span>`:""}</div>
+      <div class="rvans">${mark}<b>${esc(q.pick||"No answer")}</b>${q.pick&&q.ok===false&&q.reason?`<span class="muted" style="font-size:13px">${esc(q.reason)}</span>`:""}</div>
       ${body}</div>`; }).join("");
   const status = !sample ? `<div class="notice bad">Claude isn't connected on this device, so there's no review. Check the access code in the lobby.</div>`
     : done+errs<ql.length ? `<div class="notice"><span class="spin"></span> Claude is reviewing your answers: ${done} of ${ql.length} done.${mine?"":" (It runs on the player's device.)"}</div>`
@@ -1136,7 +1143,7 @@ function practiceHTML(){
   const hist=(G.history||[]).filter(h=>h&&h.of);
   return `<section class="rv">
     <div class="rvhead"><div><div class="eyebrow">Practice review · ${esc(G.players.A.team)}</div><h2 style="margin:4px 0 0">How did you do?</h2></div>
-      <div style="text-align:right"><div class="rvscore num">${right}/${ql.length}</div><div class="muted" style="font-size:13px">correct${hist.length?` · last time ${hist[hist.length-1].score}/${hist[hist.length-1].of}`:""}</div></div></div>
+      <div style="text-align:right"><div class="rvscore num">${right}/${ql.length}</div><div class="muted" style="font-size:13px">correct${open?` · ${open} still being checked`:""}${hist.length?` · last time ${hist[hist.length-1].score}/${hist[hist.length-1].of}`:""}</div></div></div>
     ${status}
     ${mine?`<div class="btnrow"><button class="btn gold" id="practiceagain">Practice again</button><span class="muted" style="align-self:center;font-size:13px">New questions, same formation.</span></div>`:""}
     ${cards}
@@ -1389,7 +1396,8 @@ async function createPractice(){
 }
 async function practiceAgain(){
   await commit(st=>{ if(st.phase!=="practice") return false;
-    st.history=[...(st.history||[]), {score: (st.qlog||[]).filter(q=>q.ok).length, of:(st.qlog||[]).length}].slice(-10);
+    const it=st.review?.items||{};
+    st.history=[...(st.history||[]), {score: (st.qlog||[]).filter((q,i)=>q.ok===true || (q.ok===null && it[i]?.correct===true)).length, of:(st.qlog||[]).length}].slice(-10);
     delete st.review; st.qlog=[]; st.log=[]; st.usedIds=(st.usedIds||[]).slice(-140);
     pushLog(st, "New practice draft. Fresh questions.", "A"); startDraft(st); });
 }
@@ -1786,9 +1794,9 @@ function panelHTML(){
     const vetoOk = mySeat===reviewer && !G.squads[reviewer].vetoUsed && (!ai || ru.valid);
     body = `<h4>${team(picker)} picked</h4>
       <div class="ruling ${verdict}">
-        <div class="verdict">${!ai?"No ruling":ru.valid?"Valid":"Invalid"}</div>
+        <div class="verdict">${!ai?(G.practice?"Checked later":"No ruling"):ru.valid?"Valid":"Invalid"}</div>
         <div><b>${esc(ru?.canonicalName||pend.name)}</b>${pend.slot?` · ${esc(pend.slot)}`:""}${ru?.nationalTeam?` · ${esc(ru.nationalTeam)}`:""}${ru?.retired?" · retired":""}</div>
-        <div style="font-size:14px">${esc(ai?ru.reason:"Claude couldn't rule on this one, so the opponent decides.")}${ai&&ru.searched?` <span style="opacity:.6;font-size:12px">· checked online</span>`:""}</div>
+        <div style="font-size:14px">${esc(ai?ru.reason:G.practice?"Claude couldn't rule on this one. It goes in your squad for now, and Claude settles it in your review at the end.":"Claude couldn't rule on this one, so the opponent decides.")}${ai&&ru.searched?` <span style="opacity:.6;font-size:12px">· checked online</span>`:""}</div>
         ${!ai&&pend.err?`<div class="muted" style="font-size:12px">Referee error: ${esc(pend.err)}</div>`:""}
       </div>
       ${mySeat===reviewer ? `<div class="btnrow">
