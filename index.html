@@ -139,6 +139,14 @@ button{cursor:pointer}
 .rvmiss{margin:0;padding-left:18px;display:grid;gap:6px}
 .rvmiss b{font-weight:800}
 .rvmiss span{color:var(--muted)}
+.lb{border:2px solid var(--rule);border-radius:14px;padding:12px 14px;display:grid;gap:6px}
+.lb ol{margin:0;padding:0;list-style:none;display:grid;gap:4px}
+.lb li{display:grid;grid-template-columns:28px minmax(0,1fr) auto;gap:10px;align-items:baseline;padding:4px 6px;border-radius:8px}
+.lb li.me{background:rgba(242,183,5,.22)}
+.lb .rk{font-weight:900;color:var(--muted)}
+.lb .tm{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lb .tm small{color:var(--muted);font-size:12px}
+.lb .av{font-family:var(--display);font-weight:900;font-size:20px}
 @media (max-width:700px){.arena.two{grid-template-columns:1fr}}
 .team{background:var(--card);border-radius:18px;box-shadow:var(--shadow);padding:14px;display:grid;gap:12px;min-width:0}
 .team header{display:flex;justify-content:space-between;align-items:flex-start;gap:8px}
@@ -369,7 +377,7 @@ const FIREBASE_CONFIG = {
 };
 const API_URL = "/api/claude";
 /* Both devices must run the same version of the game. Bump this whenever the game logic changes. */
-const APP_VERSION = "2026-10-09b";
+const APP_VERSION = "2026-10-09d";
 
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { initializeFirestore, doc as fdoc, getDoc, setDoc, onSnapshot as fsnap, collection as fcol, query as fquery, orderBy as forder, limit as flimit, runTransaction } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -1122,6 +1130,46 @@ Reply with only JSON, compactly on one line: {"items":[{"i":${qs[0].i},"verdict"
 async function retryPracticeReview(){
   await commit(st=>{ if(st.phase!=="practice" || !st.review) return false; const it={...(st.review.items||{})}; let n=0; for(const k of Object.keys(it)) if(it[k]&&it[k].err){ delete it[k]; n++; } if(!n) return false; st.review.items=it; });
 }
+/* ---------- practice leaderboard: the top ten practice squads by average rating ----------
+   One shared document (games/_practice_top) so it needs no extra database rules.
+   Average over the XI and the bench; a spot you missed counts as a 50, a pick nobody could rate as a 75. */
+const LB_DOC = "games/_practice_top", LB_MISS = 50, LB_UNRATED = 75;
+let LB = [];
+function practiceAvg(st){
+  const sq=st.squads?.A; if(!sq) return null;
+  const items=st.review?.items||{};
+  const wrong=new Set((st.qlog||[]).filter((q,i)=>q.ok===null && items[i]?.correct===false).map(q=>norm(q.pick)));
+  const ps=[...Object.values(sq.slots), ...sq.subs];
+  const got=ps.filter(v=>v && v.name && !v.spin && !v.isMeme && !wrong.has(norm(v.name)));
+  const val=v=>v.noAI||!v.rating ? LB_UNRATED : v.rating;
+  const sum=got.reduce((t,v)=>t+val(v),0) + (ps.length-got.length)*LB_MISS;
+  const star=[...got].sort((a,b)=>val(b)-val(a))[0];
+  return {avg: Math.round(sum/ps.length*10)/10, filled: got.length, of: ps.length, star: star ? `${star.name} ${val(star)}` : ""};
+}
+async function submitPracticeScore(){
+  const st=G; if(!db || !st?.practice || st.phase!=="practice" || mySeat!=="A") return;
+  const n=st.practice.n||1; if(st.practice.lb===n) return;
+  if(sample && rvTodo().length) return;   // wait until the review has settled every pick
+  const k="lb"+st.id+n; if(fired[k]) return; fired[k]=1;
+  const a=practiceAvg(st); if(!a) return;
+  const items=st.review?.items||{};
+  const correct=(st.qlog||[]).filter((q,i)=>q.ok===true || (q.ok===null && items[i]?.correct===true)).length;
+  const entry={id:st.id+"-"+n, team:st.players.A.team, formation:st.squads.A.formation, avg:a.avg, filled:a.filled, of:a.of, correct, asked:(st.qlog||[]).length, star:a.star, at:Date.now()};
+  const ok=await commit(s=>{ if(s.phase!=="practice" || s.practice?.lb===n) return false; s.practice={...s.practice, lb:n, last:entry}; });
+  if(!ok) return;
+  try{
+    const ref=db.doc(LB_DOC);
+    const snap=await ref.get(); if(!snap.exists) await ref.set({id:"_practice_top", leaderboard:true, entries:[]});
+    await ref.update(d=>{ const e=(d.entries||[]).filter(x=>x && x.id!==entry.id); e.push(entry); e.sort((x,y)=>y.avg-x.avg || y.correct-x.correct || x.at-y.at); d.entries=e.slice(0,10); });
+  }catch(e){ console.warn("leaderboard", e); }
+}
+function lbHTML(myId, title){
+  const rows=(LB||[]).slice(0,10);
+  return `<div class="lb"><div class="eyebrow">${esc(title||"Practice leaderboard · top 10 by average rating")}</div>
+    ${rows.length?`<ol>${rows.map((e,i)=>`<li class="${e.id===myId?"me":""}"><span class="rk num">${i+1}</span><span class="tm"><b>${esc(e.team)}</b> <small>${e.correct}/${e.asked} right · ${e.filled}/${e.of} spots filled${e.star?` · best: ${esc(e.star)}`:""}</small></span><span class="av num">${Number(e.avg).toFixed(1)}</span></li>`).join("")}</ol>`
+      :`<div class="muted" style="font-size:13px">No practice squads yet. Finish a practice draft to get on the board.</div>`}
+    <div class="muted" style="font-size:12px">Average over your XI and bench. A spot you missed counts as a ${LB_MISS}.</div></div>`;
+}
 function practiceHTML(){
   const ql=G.qlog||[], items=G.review?.items||{}, done=ql.filter((q,i)=>items[i]&&!items[i].err).length, errs=ql.filter((q,i)=>items[i]&&items[i].err).length;
   const okOf = (q,i) => q.ok===null ? (items[i] && typeof items[i].correct==="boolean" ? items[i].correct : null) : q.ok;
@@ -1145,6 +1193,9 @@ function practiceHTML(){
     <div class="rvhead"><div><div class="eyebrow">Practice review · ${esc(G.players.A.team)}</div><h2 style="margin:4px 0 0">How did you do?</h2></div>
       <div style="text-align:right"><div class="rvscore num">${right}/${ql.length}</div><div class="muted" style="font-size:13px">correct${open?` · ${open} still being checked`:""}${hist.length?` · last time ${hist[hist.length-1].score}/${hist[hist.length-1].of}`:""}</div></div></div>
     ${status}
+    ${(()=>{ const last=G.practice?.last, a=last||practiceAvg(G), myId=G.id+"-"+(G.practice?.n||1), rank=(LB||[]).findIndex(e=>e.id===myId);
+      const line = !a ? "" : `<div class="notice"><b>Your squad averages ${Number(a.avg).toFixed(1)}</b> (${a.filled}/${a.of} spots filled${a.star?`, best: ${esc(a.star)}`:""}). ${!last?"It goes on the leaderboard once the review is done.":rank>=0?`That's <b>#${rank+1}</b> on the leaderboard.`:(LB||[]).length>=10?`Not in the top 10 this time: 10th is ${Number(LB[9].avg).toFixed(1)}.`:""}</div>`;
+      return line + lbHTML(myId); })()}
     ${mine?`<div class="btnrow"><button class="btn gold" id="practiceagain">Practice again</button><span class="muted" style="align-self:center;font-size:13px">New questions, same formation.</span></div>`:""}
     ${cards}
     ${mine&&ql.length>3?`<div class="btnrow"><button class="btn gold" id="practiceagain2">Practice again</button></div>`:""}
@@ -1325,6 +1376,7 @@ Write a line for every key moment, keyed by its "i", each under 20 words. Descri
    ============================================================ */
 
 function openGame(id){
+  if(String(id).startsWith("_")) return;
   if(unsubGame) unsubGame();
   gameRef = db.doc("games/"+id); G=null; mySeat=null; uiSel={slot:null}; matchOffset=0; PB=null;
   try{ history.replaceState(null,"","#"+id); }catch(e){}
@@ -1338,6 +1390,8 @@ function applyState(data){
   if(G && data.id===G.id && (data.seq||0) < (G.seq||0)) return;
   if(G && data.id===G.id && (data.seq||0) === (G.seq||0) && data.updatedAt===G.updatedAt) return;
   const prev = G; G = data;
+  // a new draft in the same game (rematch, practice again) reuses round keys: forget what we did last draft
+  if(prev && prev.id===G.id && G.seq0 && prev.seq0!==G.seq0){ fired={}; inflight={}; }
   mySeat = G.players.A?.uid===me.id ? "A" : G.players.B?.uid===me.id ? "B" : null;
   if(prev?.round?.key !== G.round?.key) uiSel={slot:null};
   render();
@@ -1387,7 +1441,7 @@ async function createPractice(){
   const refTier = $("#reftier")?.value||"quick";
   lsSet("dn_team", team); lsSet("dn_form", formation);
   const chars="ABCDEFGHJKMNPQRSTUVWXYZ23456789"; let id=""; for(let i=0;i<5;i++) id+=chars[Math.floor(Math.random()*chars.length)];
-  const st = {id, appV:APP_VERSION, lastV:APP_VERSION, vseq:1, solo:{level:"medium"}, practice:{at:Date.now()}, createdAt:Date.now(), updatedAt:Date.now(), seq:1, phase:"lobby", settings:{refTier}, refOk:{}, usedIds:seenIds(),
+  const st = {id, appV:APP_VERSION, lastV:APP_VERSION, vseq:1, solo:{level:"medium"}, practice:{at:Date.now(), n:1}, createdAt:Date.now(), updatedAt:Date.now(), seq:1, phase:"lobby", settings:{refTier}, refOk:{}, usedIds:seenIds(),
     players:{A:{uid:me.id, team, formation}, B:{uid:"practice", team:"Practice", formation, bot:true}}, log:[]};
   pushLog(st, `${team}: practice draft. No opponent and no match. At the end Claude goes through every question with you.`, "A");
   startDraft(st);
@@ -1399,6 +1453,7 @@ async function practiceAgain(){
     const it=st.review?.items||{};
     st.history=[...(st.history||[]), {score: (st.qlog||[]).filter((q,i)=>q.ok===true || (q.ok===null && it[i]?.correct===true)).length, of:(st.qlog||[]).length}].slice(-10);
     delete st.review; st.qlog=[]; st.log=[]; st.usedIds=(st.usedIds||[]).slice(-140);
+    st.practice={...(st.practice||{}), n:(st.practice?.n||1)+1, lb:null, last:null};
     pushLog(st, "New practice draft. Fresh questions.", "A"); startDraft(st); });
 }
 async function createQuick(){
@@ -1435,7 +1490,7 @@ function simRunner(){ const ok=G.refOk||{}; if(ok.A!==false) return "A"; if(ok.B
 function afterState(prev){
   if(!G) return;
   if(mySeat && G.usedIds) rememberSeen(G.usedIds);
-  if(G.practice && G.phase==="practice" && mySeat==="A") runPracticeReview();
+  if(G.practice && G.phase==="practice" && mySeat==="A"){ runPracticeReview(); submitPracticeScore(); }
   if(G.phase==="draft" && G.round?.step==="judging" && G.round.pending?.judge===mySeat) runJudge();
   if(G.solo && mySeat==="A" && G.phase==="draft"){ botTurn(); botReview(); }
   if(G.phase==="prematch" && mySeat){
@@ -1605,6 +1660,7 @@ function lobbyHTML(){
     <div class="practice-box">
       <div class="eyebrow">Or practise your ball knowledge</div>
       <div class="btnrow"><button class="btn gold" id="createpractice" ${!db||!canWrite?"disabled":""}>Practice draft</button><span class="muted" style="align-self:center;font-size:13px">Just you and the questions: no opponent, no match. At the end Claude goes through every question, with the players you could have picked and a bit about each.</span></div>
+      <details class="lbwrap"><summary>Leaderboard: top 10 practice squads</summary>${lbHTML(null, " ")}</details>
     </div>
     <details class="quick"><summary>Quick match: skip the draft</summary>
       <p class="muted" style="margin:0 0 10px">Two random squads from the wheel's player pool, straight to the team talk. Claude scouts every player and manager just like in a drafted game, so it plays the same. For testing tactics and the match engine.</p>
@@ -2380,6 +2436,7 @@ function boot(){
   platformReady = true;
   if(db){
     unsubLobby = db.collection("lobby").orderBy("updatedAt","desc").limit(10).onSnapshot(s=>{ lobby=s.docs.map(d=>d.data()); if(!G) render(); }, e=>{ console.warn(e); canWrite=false; render(); });
+    db.doc(LB_DOC).onSnapshot(s=>{ LB = s.exists && Array.isArray(s.data().entries) ? s.data().entries : []; if(!G || G.phase==="practice") render(); }, e=>console.warn("leaderboard", e));
     const h = (location.hash||"").replace("#","").toUpperCase();
     if(/^[A-Z0-9]{5}$/.test(h)) openGame(h);
   }
