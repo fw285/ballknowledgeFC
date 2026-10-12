@@ -377,10 +377,10 @@ const FIREBASE_CONFIG = {
 };
 const API_URL = "/api/claude";
 /* Both devices must run the same version of the game. Bump this whenever the game logic changes. */
-const APP_VERSION = "2026-10-09e";
+const APP_VERSION = "2026-10-11a";
 
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-import { initializeFirestore, doc as fdoc, getDoc, setDoc, onSnapshot as fsnap, collection as fcol, query as fquery, orderBy as forder, limit as flimit, runTransaction } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { initializeFirestore, doc as fdoc, getDoc, getDocFromServer, setDoc, onSnapshot as fsnap, collection as fcol, query as fquery, orderBy as forder, limit as flimit, runTransaction } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { simulateMatch, digest, defaultTactics, STYLE_TACTICS, PLAYSTYLES, ATTR_KEYS, GK_KEYS, ENGINE_VERSION } from "./engine.js";
 
 /* Firestore adapter with the same shape the game already uses */
@@ -391,6 +391,9 @@ function makeDb(){
   const docRef = path => { const r = fdoc(fs, path); return {
     id:r.id, path,
     get: async () => wrap(await getDoc(r)),
+    // straight from the server: getDoc can hand back the live listener's cached copy, which lags behind a write this
+    // device just made in a transaction (that stale copy is what made kick-off fail with "moved on to prematch")
+    getFresh: async () => { try { return wrap(await getDocFromServer(r)); } catch(e) { console.warn("server read", e); return runTransaction(fs, async tx => wrap(await tx.get(r))); } },
     set: d => setDoc(r, JSON.parse(JSON.stringify(d))),
     // read-modify-write in a transaction, so two devices editing at once can't overwrite each other
     update: mut => runTransaction(fs, async tx => {
@@ -520,7 +523,9 @@ function dieHTML(n, cls=""){
   return `<svg class="die ${cls} ${n===6?"gold":""}" viewBox="0 0 40 40" role="img" aria-label="Ten-sided die showing ${n}"><polygon class="face" points="20,1.5 38.5,17 20,38.5 1.5,17"/><polyline class="edge" points="6,20 20,27 34,20"/><text x="20" y="16.5" text-anchor="middle" dominant-baseline="central">${n}</text></svg>`;
 }
 function slotsOf(form){ return FORMATIONS[form].map(([k,label,g,x,y])=>({k,label,g,x,y})); }
-const pickMs = r => r && r.dice===10 ? SPEED_MS : PICK_MS;
+// The dice for the current pick: a question change re-rolls it for that player only, the opponent keeps the round's roll.
+const curDice = r => !r ? null : (r.turns && r.turns[r.ti] && r.turns[r.ti].dice!=null ? r.turns[r.ti].dice : r.dice);
+const pickMs = r => r && curDice(r)===10 ? SPEED_MS : PICK_MS;
 
 /* ============================================================
    State + platform
@@ -677,7 +682,7 @@ function nextRound(st){
   pushLog(st, "The draft is complete. Team talk: set your tactics.");
 }
 function turnCat(r){ const t=r.turns[r.ti]; return t.cat||r.cat; }
-function canReroll(r){ return r && r.kind!=="captain" && !(r.dice===9 && (r.kind==="starter"||r.kind==="sub")); }
+function canReroll(r){ return r && r.kind!=="captain" && !(curDice(r)===9 && (r.kind==="starter"||r.kind==="sub")); }
 function advanceTurn(st){
   const r=st.round; r.ti++;
   if(r.ti>=r.turns.length){ nextRound(st); return; }
@@ -725,7 +730,7 @@ function cleanTactics(t){
 function noteAnswer(st, p, pick, ok, reason, how, slot){
   const r=st.round; if(!st.practice || p!=="A" || !r || r.kind==="captain") return;
   const c=turnCat(r);
-  (st.qlog=st.qlog||[]).push({kind:r.kind, t:c.t, h:c.h||"", dice:r.dice||null, now:!!(c.cur || /currently|right now|this season|on loan|EA FC 27|2026/i.test(c.t||"")), pick:pick||null, ok: ok===null ? null : !!ok, reason:String(reason||"").slice(0,300), how, slot:slot||null});
+  (st.qlog=st.qlog||[]).push({kind:r.kind, t:c.t, h:c.h||"", dice:curDice(r)||null, now:!!(c.cur || /currently|right now|this season|on loan|EA FC 27|2026/i.test(c.t||"")), pick:pick||null, ok: ok===null ? null : !!ok, reason:String(reason||"").slice(0,300), how, slot:slot||null});
 }
 function placeResult(st, p, turn, kind, final, ruling, pending){
   const sq = st.squads[p], team = st.players[p].team, r=st.round;
@@ -736,7 +741,7 @@ function placeResult(st, p, turn, kind, final, ruling, pending){
     const g = kind==="sub" ? "CM" : slotInfo(sq, pending.slot).g;
     if(final){
       const attrs = ai ? {rating:ruling.rating, attack:ruling.attack, defense:ruling.defense, pace:ruling.pace} : defaultAttrs(g);
-      const pl = {name: ruling?.canonicalName || pending.name, nationality: ruling?.nationality||"", nationalTeam: ruling?.nationalTeam||ruling?.nationality||"", clubs: ruling?.clubs||[], positions: ruling?.positions||[], retired: !!ruling?.retired, fiery: !!ruling?.fiery, golden: r.dice===6, noAI: !ai, ...attrs, ...(ai?cleanPlayerExtras(ruling):{})};
+      const pl = {name: ruling?.canonicalName || pending.name, nationality: ruling?.nationality||"", nationalTeam: ruling?.nationalTeam||ruling?.nationality||"", clubs: ruling?.clubs||[], positions: ruling?.positions||[], retired: !!ruling?.retired, fiery: !!ruling?.fiery, golden: curDice(r)===6, noAI: !ai, ...attrs, ...(ai?cleanPlayerExtras(ruling):{})};
       if(kind==="sub") sq.subs[sq.subs.indexOf(null)] = pl; else sq.slots[pending.slot] = pl;
       pushLog(st, `${team}: ${pl.name}${kind==="sub"?" to the bench":" at "+pending.slot}${pl.golden?" (golden)":""}.`, p);
     } else {
@@ -838,12 +843,18 @@ const M = {
   reroll(key, seat){ return st=>{
     const r=st.round; if(!r||r.key!==key||r.step!=="pick") return false;
     const turn=r.turns[r.ti], sq=st.squads[seat]; if(turn.p!==seat||sq.rerollUsed||!canReroll(r)) return false;
-    const old=turnCat(r); let cat;
-    if(r.kind==="starter"||r.kind==="sub") cat=drawPlayerCat(st, r.dice);
+    const old=turnCat(r); let cat, rolled=null;
+    if(r.kind==="starter"||r.kind==="sub"){
+      // re-roll the dice as well. Reverse can't apply halfway through a round, and practice skips the ones that mean nothing solo.
+      const skip = st.practice ? [2,6,9] : [2], was = curDice(r);
+      do{ rolled = 1+Math.floor(Math.random()*10); }while(skip.includes(rolled) || rolled===was);
+      turn.dice = rolled;
+      let n=0; do{ cat=drawPlayerCat(st, rolled); n++; }while(cat.t===old.t && n<10);
+    }
     else { let n=0; do{ cat=drawCat(st, r.kind); n++; }while(cat.t===old.t && n<10); }
     turn.cat=cat; sq.rerollUsed=true;
     r.attempt++; r.key=`${r.stage}.${r.ti}.${r.attempt}`; r.deadline=Date.now()+pickMs(r);
-    pushLog(st, `${st.players[seat].team} used their question change. New question: ${cat.t}.`, seat);
+    pushLog(st, `${st.players[seat].team} used their question change. ${rolled?`New roll: ${rolled} (${DICE[rolled].n}). `:""}New question: ${cat.t}.`, seat);
   };},
   spinDone(key){ return st=>{ const r=st.round; if(!r||r.key!==key||r.kind!=="spin"||Date.now()<r.deadline) return false; advanceTurn(st); };},
   setTac(seat, k, v){ return st=>{
@@ -874,7 +885,8 @@ async function judge(st, seat, name, slot){
   if(!sample) return {fail:"unavailable"};
   const now = new Date(), today = now.toLocaleDateString("en-US",{day:"numeric",month:"long",year:"numeric"});
   const yy = now.getFullYear(), season = now.getMonth()>=6 ? `${yy}/${String(yy+1).slice(2)}` : `${yy-1}/${String(yy).slice(2)}`;
-  const diceRule = r.dice && DICE[r.dice].ai ? DICE[r.dice].n.toUpperCase()+": "+DICE[r.dice].ai : "none";
+  const rdice = curDice(r);
+  const diceRule = rdice && DICE[rdice].ai ? DICE[rdice].n.toUpperCase()+": "+DICE[rdice].ai : "none";
   const slotRole = kind==="sub" ? "any position (substitute)" : (slot ? slotInfo(sq,slot).label : "n/a");
   const bank = kind==="starter"||kind==="sub" ? "player" : kind;
   const shapes = {
@@ -920,7 +932,7 @@ ${shapes[bank]}`;
   // Fast path first: a quick model with no web search settles most picks in a few seconds.
   // Anything about the present day (or a name it doesn't know) goes to the searching referee.
   const thorough = st.settings?.refTier==="default";
-  const aboutNow = !!cat.cur || (bank==="player" && r.dice===1) || /currently|right now|this season|on loan|EA FC 27|2026/i.test(cat.t||"");
+  const aboutNow = !!cat.cur || (bank==="player" && curDice(r)===1) || /currently|right now|this season|on loan|EA FC 27|2026/i.test(cat.t||"");
   let res = null;
   if(!thorough && !aboutNow){
     try{ const f = await sample.json(fastHead+"\n"+body, {modelTier:"fast", cache:false, search:false, timeoutMs:25000});
@@ -939,11 +951,11 @@ ${shapes[bank]}`;
   ["rating","attack","defense","pace"].forEach(k=>{ if(ru[k]!=null) ru[k]=clamp(Number(ru[k])||70,35,99); });
   if(bank==="player") Object.assign(ru, cleanPlayerExtras(ru));
   const notes=[];
-  if(bank==="player" && r.dice===4 && (ru.nationalTeam||ru.nationality)){
+  if(bank==="player" && curDice(r)===4 && (ru.nationalTeam||ru.nationality)){
     const nats = squadPlayers(sq).map(x=>norm(x.nationalTeam||x.nationality));
     if(nats.includes(norm(ru.nationalTeam||ru.nationality))){ ru.fitsDice=false; notes.push(`No repeats: you already have a player from ${ru.nationalTeam||ru.nationality}.`); }
   }
-  if(bank==="player" && r.dice===8 && ru.rating>84){ ru.fitsDice=false; notes.push(`Hidden gem: Claude rates his prime at ${ru.rating}, above the 84 cap.`); }
+  if(bank==="player" && curDice(r)===8 && ru.rating>84){ ru.fitsDice=false; notes.push(`Hidden gem: Claude rates his prime at ${ru.rating}, above the 84 cap.`); }
   if(bank==="player" && ru.retired && squadPlayers(sq).filter(x=>x.retired).length>=3){ ru.retiredLimit=true; notes.push("You've already used all 3 retired slots."); }
   if(ru.canonicalName && drafted.some(n=>norm(n)===norm(ru.canonicalName))) ru.duplicate=true;
   ru.valid = !!(ru.recognized!==false && ru.fitsCategory && ru.fitsDice && ru.fitsPosition && !ru.duplicate && !ru.retiredLimit);
@@ -1044,7 +1056,8 @@ async function botTurn(){
   if(intent==="giveup"){ await wait(9000+Math.random()*9000); await commit(M.giveUp(key,"B",null)); return; }
   const kind=r.kind, bank = kind==="starter"||kind==="sub" ? "player" : kind;
   const open = kind==="starter" ? openStarterSlots(sq) : [];
-  const diceRule = r.dice && DICE[r.dice].ai ? DICE[r.dice].n+": "+DICE[r.dice].ai : r.dice===4 ? "No repeats: no nationality already in your squad ("+[...new Set(squadPlayers(sq).map(x=>x.nationalTeam||x.nationality).filter(Boolean))].join(", ")+")" : "none";
+  const bdice = curDice(r);
+  const diceRule = bdice && DICE[bdice].ai ? DICE[bdice].n+": "+DICE[bdice].ai : bdice===4 ? "No repeats: no nationality already in your squad ("+[...new Set(squadPlayers(sq).map(x=>x.nationalTeam||x.nationality).filter(Boolean))].join(", ")+")" : "none";
   const retired = squadPlayers(sq).filter(x=>x.retired).length;
   const mine = [...Object.entries(sq.slots).filter(([k,v])=>v&&v.name).map(([k,v])=>`${k}: ${v.name}`), ...sq.subs.filter(v=>v&&v.name).map(v=>"bench: "+v.name)];
   const prompt = `You are playing a football draft game against a human friend, in character. ${(BOT[level]||BOT.medium).persona}
@@ -1561,7 +1574,7 @@ async function runMatchSteps(){
   // if it stalls, anyone still unscouted plays on stats estimated from his rating
   if(prepRunning){ kickNote("Waiting for Claude's scouting reports"); await Promise.race([prepRunning, new Promise(r=>setTimeout(r, 70000))]); }
   kickNote("Reading the squads");
-  const snap = await gameRef.get(); let fresh = snap.exists ? structuredClone(snap.data()) : null;
+  const snap = await gameRef.getFresh(); let fresh = snap.exists ? structuredClone(snap.data()) : null;
   if(!fresh) throw new Error("the game couldn't be read from the database");
   if(fresh.phase!=="report") throw new Error(`the game moved on to "${fresh.phase}" while kick-off was starting`);
   if(fresh.pre && fresh.pre.prep!=="done" && !prepRunning){ kickNote("Claude is scouting the players"); const n0=backfillNeeds(fresh); if(n0.need.length||n0.mgrs.length) await Promise.race([backfillSquads(fresh), new Promise(r=>setTimeout(r, 60000))]); }
@@ -1634,7 +1647,7 @@ function render(){
   else if(G.phase==="match"||G.phase==="done") v.innerHTML = matchHTML();
   else if(G.phase==="practice") v.innerHTML = versionBanner() + practiceHTML();
   restoreInputs(c);
-  if(G && G.round) rolledKey = G.round.stage+":"+G.seq0;
+  if(G && G.round) rolledKey = diceKey(G.round);
   bind();
   updateTimerUI();
   if(G && (G.phase==="match")) { if(!raf) startPlayback(); else frame(true); }
@@ -1715,6 +1728,7 @@ function waitingHTML(){
 }
 
 let rolledKey=null;
+const diceKey = r => r.stage+":"+G.seq0+(r.turns[r.ti]?.dice!=null ? ":"+r.ti+":"+r.turns[r.ti].dice : "");
 function roundLabel(r){
   if(r.kind==="starter") return `Round ${r.stage+1} of 11 · Starters${G?.practice?" · Practice":""}`;
   if(r.kind==="sub") return `Bench pick ${r.stage-10} of 3`;
@@ -1730,7 +1744,7 @@ function draftHTML(){
        <div class="meta"><span>${esc(roundLabel(r))}</span><span>·</span><span style="color:${picker==="A"?"var(--cobalt-soft)":"var(--red-soft)"}">${r.kind==="spin"?"Both teams":esc(G.players[picker].team)+" to pick"}</span></div>
        <div class="cat">${esc(cat.t)}</div>
        <div class="hint">${esc(cat.h||"")}</div>
-       ${r.dice?`<div class="dicefx">${dieHTML(r.dice, rolledKey!==r.stage+":"+G.seq0 ? "roll":"")}<div><b>${esc(DICE[r.dice].n)}</b><div style="font-size:13px;opacity:.8">${esc(DICE[r.dice].d)}</div></div></div>`:""}
+       ${curDice(r)?(()=>{ const d=curDice(r); return `<div class="dicefx">${dieHTML(d, rolledKey!==diceKey(r) ? "roll":"")}<div><b>${esc(DICE[d].n)}</b><div style="font-size:13px;opacity:.8">${esc(DICE[d].d)}${turn.dice!=null?` <span style="opacity:.8">(re-rolled for ${esc(G.players[picker].team)})</span>`:""}</div></div></div>`; })():""}
      </div>
      <div class="timer" id="timer"><svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="44" fill="none" stroke="rgba(255,255,255,.15)" stroke-width="8"/><circle id="tarc" cx="50" cy="50" r="44" fill="none" style="stroke:var(--saffron)" stroke-width="8" stroke-linecap="round" stroke-dasharray="276.5" stroke-dashoffset="0"/></svg><div class="t"><div><small id="tlabel">pick</small><span id="tnum" class="num">60</span></div></div></div>
    </section>
@@ -1842,7 +1856,7 @@ function panelHTML(){
           <form id="pickform" class="field" style="gap:10px" autocomplete="off">
             <div class="field"><label for="pick">${lbl}</label><input id="pick" maxlength="60" placeholder="${r.kind==="stadium"?"Type a stadium":r.kind==="manager"?"Type a manager":r.kind==="aura"?"Type a moment, chant or ritual":"Type a name"}" autofocus></div>
             ${slotNote}
-            <div class="btnrow"><button class="btn gold" type="submit">Lock it in</button><button class="btn ghost" type="button" id="giveup" title="${r.kind==="starter"||r.kind==="sub"?"Skip this pick. The slot goes to the wheel after the player rounds.":"Skip this pick and take the booby prize."}">Give up</button>${canReroll(r)?(G.squads[mySeat].rerollUsed?`<span class="muted" style="font-size:12px;align-self:center">Question change used</span>`:`<button class="btn ghost" type="button" id="reroll" title="Swap this question for a new one. Once per game; your clock resets.">New question (1 left)</button>`):""}</div>
+            <div class="btnrow"><button class="btn gold" type="submit">Lock it in</button><button class="btn ghost" type="button" id="giveup" title="${r.kind==="starter"||r.kind==="sub"?"Skip this pick. The slot goes to the wheel after the player rounds.":"Skip this pick and take the booby prize."}">Give up</button>${canReroll(r)?(G.squads[mySeat].rerollUsed?`<span class="muted" style="font-size:12px;align-self:center">Question change used</span>`:`<button class="btn ghost" type="button" id="reroll" title="${r.kind==="starter"||r.kind==="sub"?"Re-roll the dice and get a new question. Your opponent keeps this round's roll.":"Swap this question for a new one."} Once per game; your clock resets.">New question (1 left)</button>`):""}</div>
             <div id="pickerr" style="color:var(--red);font-size:13px" role="alert"></div>
           </form>`;
       }
