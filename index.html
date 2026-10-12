@@ -377,10 +377,10 @@ const FIREBASE_CONFIG = {
 };
 const API_URL = "/api/claude";
 /* Both devices must run the same version of the game. Bump this whenever the game logic changes. */
-const APP_VERSION = "2026-10-11a";
+const APP_VERSION = "2026-10-11b";
 
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-import { initializeFirestore, doc as fdoc, getDoc, getDocFromServer, setDoc, onSnapshot as fsnap, collection as fcol, query as fquery, orderBy as forder, limit as flimit, runTransaction } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { initializeFirestore, doc as fdoc, getDoc, setDoc, onSnapshot as fsnap, collection as fcol, query as fquery, orderBy as forder, limit as flimit, runTransaction } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { simulateMatch, digest, defaultTactics, STYLE_TACTICS, PLAYSTYLES, ATTR_KEYS, GK_KEYS, ENGINE_VERSION } from "./engine.js";
 
 /* Firestore adapter with the same shape the game already uses */
@@ -391,9 +391,10 @@ function makeDb(){
   const docRef = path => { const r = fdoc(fs, path); return {
     id:r.id, path,
     get: async () => wrap(await getDoc(r)),
-    // straight from the server: getDoc can hand back the live listener's cached copy, which lags behind a write this
-    // device just made in a transaction (that stale copy is what made kick-off fail with "moved on to prematch")
-    getFresh: async () => { try { return wrap(await getDocFromServer(r)); } catch(e) { console.warn("server read", e); return runTransaction(fs, async tx => wrap(await tx.get(r))); } },
+    // read inside a transaction: that always goes to the database itself. getDoc and even getDocFromServer hand back
+    // the live listener's copy while one is open, and that copy lags behind a write this device just made in a
+    // transaction (the stale "prematch" it held is what made kick-off fail with "moved on to prematch")
+    getFresh: () => runTransaction(fs, async tx => wrap(await tx.get(r))),
     set: d => setDoc(r, JSON.parse(JSON.stringify(d))),
     // read-modify-write in a transaction, so two devices editing at once can't overwrite each other
     update: mut => runTransaction(fs, async tx => {
