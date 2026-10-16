@@ -377,7 +377,7 @@ const FIREBASE_CONFIG = {
 };
 const API_URL = "/api/claude";
 /* Both devices must run the same version of the game. Bump this whenever the game logic changes. */
-const APP_VERSION = "2026-10-11b";
+const APP_VERSION = "2026-10-15a";
 
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { initializeFirestore, doc as fdoc, getDoc, setDoc, onSnapshot as fsnap, collection as fcol, query as fquery, orderBy as forder, limit as flimit, runTransaction } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -570,14 +570,18 @@ function drawCat(st, bank){
   return {...list[i], bank};
 }
 function catFits(c, dice){ return !(dice===1&&c.cur) && !(dice===3&&c.old) && !(dice===4&&c.nat); }
-function drawPlayerCat(st, dice){
+// Has this team's goalkeeper spot gone (filled, or lost to the wheel)? Then a goalkeeper-only question is unanswerable.
+function gkGone(sq){ if(!sq) return false; const s=slotsOf(sq.formation).find(x=>x.g==="GK"); return !!s && sq.slots[s.k]!==null; }
+// seats: who will answer this question (both pickers in a round, or just the one changing his question)
+function drawPlayerCat(st, dice, seats){
   if(dice===9) return {t:"Wildcard: any player you like", h:"No category this round. The usual rules still apply.", bank:"player", wild:true, id:"wild"};
   st.usedIds = st.usedIds||[];
   const used = new Set(st.usedIds);
-  const ok = c => !used.has(c.id) && catFits(c, dice);
+  const noGK = (seats||["A","B"]).some(p=>gkGone(st.squads?.[p]));
+  const ok = c => !used.has(c.id) && catFits(c, dice) && !(noGK && c.gk);
   const mix = QUESTION_MIX||{};
   let buckets = [[SPECIAL_CATS.filter(ok),mix.questions??52],[PAIR_CATS.filter(ok),mix.clubPairs??16],[CLUB_CATS.filter(ok),mix.clubs??16],[NAT_CATS.filter(ok),mix.nations??16],[NATCLUB_CATS.filter(ok),mix.natClubs??14]].filter(b=>b[0].length && b[1]>0);
-  if(!buckets.length){ st.usedIds=[]; buckets=[[SPECIAL_CATS.filter(c=>catFits(c,dice)),1]]; }
+  if(!buckets.length){ st.usedIds=[]; buckets=[[SPECIAL_CATS.filter(c=>catFits(c,dice) && !(noGK && c.gk)),1]]; }
   let r = Math.random()*buckets.reduce((s,b)=>s+b[1],0), pool=buckets[0][0];
   for(const b of buckets){ r-=b[1]; if(r<=0){ pool=b[0]; break; } }
   const c = rand(pool); st.usedIds.push(c.id);
@@ -668,7 +672,7 @@ function nextRound(st){
       if(st.practice) while(dice===2||dice===6||dice===9) dice = 1+Math.floor(Math.random()*10);   // reverse, golden and wildcard mean nothing solo
       let first = base; if(dice===2) first = other(first);
       const cat = kind==="captain" ? {t:"Name your captain",h:"Pick one of your starters. The captain takes your first penalty.",bank:"captain"}
-        : (kind==="starter"||kind==="sub") ? drawPlayerCat(st, dice) : drawCat(st, kind);
+        : (kind==="starter"||kind==="sub") ? drawPlayerCat(st, dice, st.practice ? ["A"] : [first, other(first)]) : drawCat(st, kind);
       st.round = {stage:st.stage, kind, dice, cat, turns: st.practice ? [{p:"A"}] : [{p:first},{p:other(first)}], ti:0, attempt:0, step:"pick", pending:null};
     }
     st.round.deadline = Date.now()+pickMs(st.round);
@@ -850,7 +854,7 @@ const M = {
       const skip = st.practice ? [2,6,9] : [2], was = curDice(r);
       do{ rolled = 1+Math.floor(Math.random()*10); }while(skip.includes(rolled) || rolled===was);
       turn.dice = rolled;
-      let n=0; do{ cat=drawPlayerCat(st, rolled); n++; }while(cat.t===old.t && n<10);
+      let n=0; do{ cat=drawPlayerCat(st, rolled, [seat]); n++; }while(cat.t===old.t && n<10);
     }
     else { let n=0; do{ cat=drawCat(st, r.kind); n++; }while(cat.t===old.t && n<10); }
     turn.cat=cat; sq.rerollUsed=true;

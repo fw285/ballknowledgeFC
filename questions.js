@@ -9,6 +9,8 @@
             "Outside the bubble" dice roll)
      old:1  needs a long career (never drawn on the "Youth only" roll)
      nat:1  about nationality (never drawn on the "No repeats" roll)
+     gk:1   only a goalkeeper can answer it (never drawn once the picker's
+            goalkeeper spot is filled)
 
    The nationality x club list (NAT_CLUB_QUESTIONS) works the same way;
    its weight in QUESTION_MIX is natClubs.
@@ -183,7 +185,7 @@ export const PLAYER_QUESTIONS = [
  {t:"Is an Icon in Ultimate Team",h:"A retired legend with an Icon card in any FIFA or EA FC edition.",old:1},
  {t:"Was the highest-rated player in a FIFA or EA FC edition",h:"Top of the ratings that year. Shared counts."},
  {t:"Had a FIFA or EA FC card rated under 65 and later one rated 85 or higher",h:"The late bloomers and the glow-ups."},
- {t:"Is a goalkeeper with a FIFA or EA FC base card rated 88 or higher",h:"Any edition. Base card, not promos."},
+ {t:"Is a goalkeeper with a FIFA or EA FC base card rated 88 or higher",h:"Any edition. Base card, not promos.",gk:1},
  {t:"Has 90 or more shooting on his EA FC 27 base card",h:"Base gold card, not promos."},
  {t:"Has 88 or more passing on his EA FC 27 base card",h:"Base gold card, not promos."},
  {t:"Has 88 or more defending on his EA FC 27 base card",h:"Base gold card, not promos."},
@@ -224,8 +226,8 @@ export const PLAYER_QUESTIONS = [
  {t:"Has 100 or more caps for his country",h:"Senior internationals.",old:1},
  {t:"Has won the Premier League Golden Boot",h:"Outright or shared."},
  {t:"Has won the Champions League three or more times",h:"In the winning squad."},
- {t:"Has won the Premier League Golden Glove or the Zamora Trophy",h:"The goalkeeping awards in England and Spain."},
- {t:"Has kept 20 or more clean sheets in a top-five league season",h:"League games only."},
+ {t:"Has won the Premier League Golden Glove or the Zamora Trophy",h:"The goalkeeping awards in England and Spain.",gk:1},
+ {t:"Has kept 20 or more clean sheets in a top-five league season",h:"League games only.",gk:1},
  {t:"Has scored a hat-trick inside ten minutes",h:"Any competitive match, three goals within ten minutes."},
  {t:"Has scored at three or more World Cups",h:"Different tournaments, not three goals.",old:1},
  {t:"Has played at four or more World Cups",h:"At least one appearance at each.",old:1},
