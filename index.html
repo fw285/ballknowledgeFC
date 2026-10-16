@@ -377,7 +377,7 @@ const FIREBASE_CONFIG = {
 };
 const API_URL = "/api/claude";
 /* Both devices must run the same version of the game. Bump this whenever the game logic changes. */
-const APP_VERSION = "2026-10-15a";
+const APP_VERSION = "2026-10-15b";
 
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { initializeFirestore, doc as fdoc, getDoc, setDoc, onSnapshot as fsnap, collection as fcol, query as fquery, orderBy as forder, limit as flimit, runTransaction } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -457,7 +457,7 @@ let uiLevel = null;
 const configured = !!FIREBASE_CONFIG.projectId;
 /* ============================================================
    DATA: categories, formations, meme players
-   Tags: cur = needs a current top-five-league club (clashes with "outside the bubble")
+   Tags: cur = needs a current top-five-league club
          old = needs a long career (clashes with "youth only")
          nat = nationality-based (clashes with "no repeats")
    ============================================================ */
@@ -481,7 +481,7 @@ const AURA_TRIGGERS = {
  chaos:"Tempers flare: the opponent is more likely to see red"
 };
 const DICE = {
- 1:{n:"Outside the bubble",d:"He must currently play outside Europe's top five leagues. Retired players don't count.",ai:"He must CURRENTLY be an active player at a club outside the top flights of England, Spain, Italy, Germany and France. Retired players fail."},
+ 1:{n:"Rival's choice",d:"Two questions are drawn and your opponent picks which one you answer."},
  2:{n:"Reverse",d:"The second picker goes first this round."},
  3:{n:"Youth only",d:"He must be 23 or under today.",ai:"He must be 23 or younger today."},
  4:{n:"No repeats",d:"You can't pick a nationality already in your squad."},
@@ -527,6 +527,7 @@ function slotsOf(form){ return FORMATIONS[form].map(([k,label,g,x,y])=>({k,label
 // The dice for the current pick: a question change re-rolls it for that player only, the opponent keeps the round's roll.
 const curDice = r => !r ? null : (r.turns && r.turns[r.ti] && r.turns[r.ti].dice!=null ? r.turns[r.ti].dice : r.dice);
 const pickMs = r => r && curDice(r)===10 ? SPEED_MS : PICK_MS;
+const CHOOSE_MS = 10000;   // Rival's choice: how long the opponent gets to pick your question
 
 /* ============================================================
    State + platform
@@ -569,7 +570,7 @@ function drawCat(st, bank){
   const i = rand(pool); st.used[bank]=[...(st.used[bank]||[]), i];
   return {...list[i], bank};
 }
-function catFits(c, dice){ return !(dice===1&&c.cur) && !(dice===3&&c.old) && !(dice===4&&c.nat); }
+function catFits(c, dice){ return !(dice===3&&c.old) && !(dice===4&&c.nat); }
 // Has this team's goalkeeper spot gone (filled, or lost to the wheel)? Then a goalkeeper-only question is unanswerable.
 function gkGone(sq){ if(!sq) return false; const s=slotsOf(sq.formation).find(x=>x.g==="GK"); return !!s && sq.slots[s.k]!==null; }
 // seats: who will answer this question (both pickers in a round, or just the one changing his question)
@@ -669,13 +670,14 @@ function nextRound(st){
       return;
     } else {
       let dice = (kind==="starter"||kind==="sub") ? 1+Math.floor(Math.random()*10) : null;
-      if(st.practice) while(dice===2||dice===6||dice===9) dice = 1+Math.floor(Math.random()*10);   // reverse, golden and wildcard mean nothing solo
+      if(st.practice) while(dice===1||dice===2||dice===6||dice===9) dice = 1+Math.floor(Math.random()*10);   // rival's choice, reverse, golden and wildcard mean nothing solo
       let first = base; if(dice===2) first = other(first);
       const cat = kind==="captain" ? {t:"Name your captain",h:"Pick one of your starters. The captain takes your first penalty.",bank:"captain"}
-        : (kind==="starter"||kind==="sub") ? drawPlayerCat(st, dice, st.practice ? ["A"] : [first, other(first)]) : drawCat(st, kind);
+        : (kind==="starter"||kind==="sub") ? (dice===1 ? {t:"Rival's choice", h:"Your opponent is picking which of two questions you answer.", bank:"player", rival:true}
+          : drawPlayerCat(st, dice, st.practice ? ["A"] : [first, other(first)])) : drawCat(st, kind);
       st.round = {stage:st.stage, kind, dice, cat, turns: st.practice ? [{p:"A"}] : [{p:first},{p:other(first)}], ti:0, attempt:0, step:"pick", pending:null};
     }
-    st.round.deadline = Date.now()+pickMs(st.round);
+    openTurn(st);
     st.round.key = `${st.stage}.0.0`;
     return;
   }
@@ -688,10 +690,19 @@ function nextRound(st){
 }
 function turnCat(r){ const t=r.turns[r.ti]; return t.cat||r.cat; }
 function canReroll(r){ return r && r.kind!=="captain" && !(curDice(r)===9 && (r.kind==="starter"||r.kind==="sub")); }
+// Start the current turn: straight to the pick, or on a Rival's choice roll, the opponent first picks the question.
+function openTurn(st){
+  const r=st.round, turn=r.turns[r.ti]; r.pending=null;
+  if(!st.practice && (r.kind==="starter"||r.kind==="sub") && curDice(r)===1 && !turn.cat){
+    const a=drawPlayerCat(st, 1, [turn.p]); let b, n=0; do{ b=drawPlayerCat(st, 1, [turn.p]); n++; }while(b.id===a.id && n<10);
+    turn.opts=[a,b]; turn.chooser=other(turn.p); r.step="choose"; r.deadline=Date.now()+CHOOSE_MS; return;
+  }
+  r.step="pick"; r.deadline=Date.now()+pickMs(r);
+}
 function advanceTurn(st){
   const r=st.round; r.ti++;
   if(r.ti>=r.turns.length){ nextRound(st); return; }
-  r.step="pick"; r.pending=null; r.attempt=0; r.deadline=Date.now()+pickMs(r); r.key=`${r.stage}.${r.ti}.0`;
+  r.attempt=0; openTurn(st); r.key=`${r.stage}.${r.ti}.0`;
 }
 function repick(st, msg){ const r=st.round; r.attempt++; r.step="pick"; r.pending=null; r.deadline=Date.now()+pickMs(r); r.key=`${r.stage}.${r.ti}.${r.attempt}`; if(msg) pushLog(st,msg,r.turns[r.ti].p); }
 function openStarterSlots(sq){ return slotsOf(sq.formation).filter(s=>sq.slots[s.k]===null); }
@@ -837,6 +848,14 @@ const M = {
     placeResult(st, p, turn, r.kind, final, ru, pend);
     advanceTurn(st);
   };},
+  choose(key, seat, idx){ return st=>{
+    const r=st.round; if(!r||r.key!==key||r.step!=="choose") return false;
+    const turn=r.turns[r.ti]; if(seat ? seat!==turn.chooser : Date.now()<r.deadline) return false;
+    const i = idx===0||idx===1 ? idx : Math.floor(Math.random()*2), drop=turn.opts[1-i];
+    turn.cat=turn.opts[i]; st.usedIds=(st.usedIds||[]).filter(x=>x!==drop.id);   // the question not chosen goes back in the pool
+    r.step="pick"; r.attempt++; r.key=`${r.stage}.${r.ti}.${r.attempt}`; r.deadline=Date.now()+pickMs(r);
+    pushLog(st, seat ? `${st.players[seat].team} chose ${st.players[turn.p].team}'s question: ${turn.cat.t}.` : `No choice in time: ${st.players[turn.p].team}'s question is ${turn.cat.t}.`, seat||turn.p);
+  };},
   timeout(key){ return st=>{
     const r=st.round; if(!r||r.key!==key||r.step!=="pick"||Date.now()<r.deadline) return false;
     forfeit(st, null, "timeout");
@@ -851,7 +870,7 @@ const M = {
     const old=turnCat(r); let cat, rolled=null;
     if(r.kind==="starter"||r.kind==="sub"){
       // re-roll the dice as well. Reverse can't apply halfway through a round, and practice skips the ones that mean nothing solo.
-      const skip = st.practice ? [2,6,9] : [2], was = curDice(r);
+      const skip = st.practice ? [1,2,6,9] : [1,2], was = curDice(r);
       do{ rolled = 1+Math.floor(Math.random()*10); }while(skip.includes(rolled) || rolled===was);
       turn.dice = rolled;
       let n=0; do{ cat=drawPlayerCat(st, rolled, [seat]); n++; }while(cat.t===old.t && n<10);
@@ -937,7 +956,7 @@ ${shapes[bank]}`;
   // Fast path first: a quick model with no web search settles most picks in a few seconds.
   // Anything about the present day (or a name it doesn't know) goes to the searching referee.
   const thorough = st.settings?.refTier==="default";
-  const aboutNow = !!cat.cur || (bank==="player" && curDice(r)===1) || /currently|right now|this season|on loan|EA FC 27|2026/i.test(cat.t||"");
+  const aboutNow = !!cat.cur || /currently|right now|this season|on loan|EA FC 27|2026/i.test(cat.t||"");
   let res = null;
   if(!thorough && !aboutNow){
     try{ const f = await sample.json(fastHead+"\n"+body, {modelTier:"fast", cache:false, search:false, timeoutMs:25000});
@@ -1086,6 +1105,23 @@ If you'd truly have no idea as a fan like you, reply {"giveUp":true}.`;
   let slot=null;
   if(kind==="starter"){ const o=openStarterSlots(G.squads.B); slot = o.some(s=>s.k===res.slot) ? res.slot : (o[0]||{}).k; }
   await commit(M.beginJudging(key, "B", String(res.name).slice(0,60), slot));
+}
+// Rival's choice against Claude: it picks which question you get (Easy picks at random; Medium and Hard go for the harder one).
+async function botChoose(){
+  const r=G?.round; if(!G?.solo || !r || r.step!=="choose" || r.turns[r.ti].chooser!=="B") return;
+  const key=r.key; if(inflight["bch"+key]) return; inflight["bch"+key]=1;
+  const level=G.solo.level||"medium", opts=r.turns[r.ti].opts||[], t0=Date.now();
+  let idx=Math.floor(Math.random()*2);
+  if(level!=="easy" && sample && opts.length===2){
+    try{ const res = await sample.json(`You are playing a football draft game against a human friend, in character. ${(BOT[level]||BOT.medium).persona}
+This round you choose which of two questions your friend must answer by naming a player who fits. Choose the one that's harder to find a strong, correct player for.
+0: "${opts[0].t}" (${opts[0].h||""})
+1: "${opts[1].t}" (${opts[1].h||""})
+Reply with only JSON: {"pick":0} or {"pick":1}`, {modelTier:"fast", cache:false, search:false, timeoutMs:7000});
+      if(res && (res.pick===0 || res.pick===1)) idx=res.pick; }catch(e){ console.warn("bot choose", e); }
+  }
+  await new Promise(res=>setTimeout(res, Math.max(0, 2500-(Date.now()-t0))));
+  if(G?.round?.key===key && G.round.step==="choose") await commit(M.choose(key, "B", idx));
 }
 // Claude accepts the referee's ruling on your picks straight away.
 function botReview(){
@@ -1518,7 +1554,7 @@ function afterState(prev){
   if(mySeat && G.usedIds) rememberSeen(G.usedIds);
   if(G.practice && G.phase==="practice" && mySeat==="A"){ runPracticeReview(); submitPracticeScore(); }
   if(G.phase==="draft" && G.round?.step==="judging" && G.round.pending?.judge===mySeat) runJudge();
-  if(G.solo && mySeat==="A" && G.phase==="draft"){ botTurn(); botReview(); }
+  if(G.solo && mySeat==="A" && G.phase==="draft"){ botTurn(); botReview(); botChoose(); }
   if(G.phase==="prematch" && mySeat){
     if(!G.pre){ const k="pi"+G.id; if(!fired[k]){ fired[k]=1; commit(st=>{ if(st.phase!=="prematch"||st.pre) return false; fillEmpties(st); st.tac={A:{},B:{}}; st.pre={ready:{A:false,B:false}, level:"extended", levelBy:null, deadline:Date.now()+PREMATCH_MS, prep:"pending"}; }); } }
     else if(G.pre.prep!=="done" && mySeat===simRunner()){ const k="prep"+G.id+G.pre.deadline; if(!fired[k]){ fired[k]=1; prepSquads(); } }
@@ -1532,11 +1568,12 @@ function tick(){
   if(gameRef && G && Date.now()-lastSnapAt > 12000 && document.visibilityState!=="hidden") refreshGame();
   if(!G || !mySeat || !canWrite) return;
   const now=Date.now();
-  if(G.phase==="draft" && G.round && G.solo && mySeat==="A"){ botTurn(); botReview(); }
+  if(G.phase==="draft" && G.round && G.solo && mySeat==="A"){ botTurn(); botReview(); botChoose(); }
   if(G.phase==="draft" && G.round){
     const r=G.round, turn=r.turns[r.ti], mine=turn.p===mySeat;
     if(r.kind==="spin"){ if(now > r.deadline){ const k="sd"+r.key; if(!fired[k]){ fired[k]=1; commit(M.spinDone(r.key)); } } return; }
     if(r.step==="pick" && now > r.deadline + (mine?300:5000)){ const k="to"+r.key; if(!fired[k]){ fired[k]=1; commit(M.timeout(r.key)); } }
+    if(r.step==="choose" && now > r.deadline + (turn.chooser===mySeat?300:4000)){ const k="ch"+r.key; if(!fired[k]){ fired[k]=1; commit(M.choose(r.key, null, null)); } }
     if(r.step==="review" && now > r.reviewDeadline + (mine?5000:300)){ const k="rv"+r.key; if(!fired[k]){ fired[k]=1; commit(M.resolve(r.key,"accept",other(turn.p))); } }
     // if the judging device has gone quiet (a phone locked mid-ruling), the other device rules too; the first answer wins
     if(r.step==="judging" && r.pending && r.pending.judge!==mySeat && now - r.pending.at > 18000 && (G.refOk||{})[mySeat]!==false){ const k="bj"+r.key+(r.pending.tried||[]).length; if(!fired[k]){ fired[k]=1; runJudge(true); } }
@@ -1747,8 +1784,8 @@ function draftHTML(){
   return `<section class="board">
      <div style="min-width:0">
        <div class="meta"><span>${esc(roundLabel(r))}</span><span>·</span><span style="color:${picker==="A"?"var(--cobalt-soft)":"var(--red-soft)"}">${r.kind==="spin"?"Both teams":esc(G.players[picker].team)+" to pick"}</span></div>
-       <div class="cat">${esc(cat.t)}</div>
-       <div class="hint">${esc(cat.h||"")}</div>
+       <div class="cat">${esc(r.step==="choose" ? "Rival's choice" : cat.t)}</div>
+       <div class="hint">${esc(r.step==="choose" ? `${G.players[turn.chooser]?.team||"The opponent"} is picking which of two questions ${G.players[picker].team} answers.` : cat.h||"")}</div>
        ${curDice(r)?(()=>{ const d=curDice(r); return `<div class="dicefx">${dieHTML(d, rolledKey!==diceKey(r) ? "roll":"")}<div><b>${esc(DICE[d].n)}</b><div style="font-size:13px;opacity:.8">${esc(DICE[d].d)}${turn.dice!=null?` <span style="opacity:.8">(re-rolled for ${esc(G.players[picker].team)})</span>`:""}</div></div></div>`; })():""}
      </div>
      <div class="timer" id="timer"><svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="44" fill="none" stroke="rgba(255,255,255,.15)" stroke-width="8"/><circle id="tarc" cx="50" cy="50" r="44" fill="none" style="stroke:var(--saffron)" stroke-width="8" stroke-linecap="round" stroke-dasharray="276.5" stroke-dashoffset="0"/></svg><div class="t"><div><small id="tlabel">pick</small><span id="tnum" class="num">60</span></div></div></div>
@@ -1847,7 +1884,15 @@ function panelHTML(){
   const r=G.round, turn=r.turns[r.ti], picker=turn.p, myTurn = picker===mySeat, pend=r.pending;
   const team=t=>esc(G.players[t].team);
   let body="";
-  if(!mySeat) body = `<p class="muted">You're watching. ${team(picker)} is picking.</p>`;
+  if(r.step==="choose"){
+    const ch=turn.chooser, opts=turn.opts||[];
+    const optHTML = btn => opts.map((c,i)=>btn ? `<button class="slotbtn" data-choose="${i}" style="text-align:left;padding:12px;display:grid;gap:4px"><b>${esc(c.t)}</b><span class="muted" style="font-size:12px">${esc(c.h||"")}</span></button>`
+      : `<div style="border:2px solid var(--rule);border-radius:10px;padding:10px"><b>${esc(c.t)}</b><div class="muted" style="font-size:12px">${esc(c.h||"")}</div></div>`).join("");
+    body = mySeat===ch ? `<h4>Rival's choice: pick ${team(picker)}'s question</h4><p class="muted" style="margin:0">Choose the one you think they'll struggle with. 10 seconds, then it's random.</p><div style="display:grid;gap:8px">${optHTML(true)}</div>`
+      : G.solo && ch==="B" ? `<h4><span class="spin"></span> Claude is choosing your question</h4><p class="muted" style="margin:0">One of these two. Your clock starts once it's picked.</p><div style="display:grid;gap:8px">${optHTML(false)}</div>`
+      : `<h4>${team(ch)} is choosing ${mySeat===picker?"your":team(picker)+"'s"} question</h4><p class="muted" style="margin:0">One of these two. The pick clock starts once it's chosen.</p><div style="display:grid;gap:8px">${optHTML(false)}</div>`;
+  }
+  else if(!mySeat) body = `<p class="muted">You're watching. ${team(picker)} is picking.</p>`;
   else if(r.step==="pick"){
     if(myTurn){
       if(r.kind==="captain"){
@@ -1902,6 +1947,7 @@ function updateTimerUI(){
   let left, total, label;
   if(r.kind==="spin"){ total=Math.max(1,r.deadline-r.start+2500); left=r.deadline-now; label="wheel"; }
   else if(r.step==="pick"){ left=r.deadline-now; total=pickMs(r); label="pick"; }
+  else if(r.step==="choose"){ left=r.deadline-now; total=CHOOSE_MS; label="choose"; }
   else if(r.step==="review"){ left=r.reviewDeadline-now; total=REVIEW_MS; label="review"; }
   else { left=total=1; label="ref"; }
   left=clamp(left,0,total);
@@ -2436,6 +2482,7 @@ function bind(){
   on("[data-slot]","keydown",e=>{ if(e.key==="Enter"||e.key===" "){ e.preventDefault(); uiSel.slot=e.currentTarget.dataset.slot; render(); } });
   on("[data-cap]","click",e=>submitCaptain(e.currentTarget.dataset.cap));
   on("#reroll","click",()=>{ if(G?.round) commit(M.reroll(G.round.key, mySeat)); });
+  on("[data-choose]","click",e=>{ if(G?.round) commit(M.choose(G.round.key, mySeat, +e.currentTarget.dataset.choose)); });
   on("#giveup","click",()=>{ const r=G?.round; if(!r) return; const what = r.kind==="starter"||r.kind==="sub" ? "That slot goes to the wheel at the end of the player rounds." : r.kind==="manager" ? "You'll get a booby-prize manager." : r.kind==="stadium" ? "You'll play at a half-empty training ground." : "You'll have no aura.";
     if(confirm(`Give up this pick? ${what}`)) commit(M.giveUp(r.key, mySeat, uiSel.slot)); });
   on("[data-rv]","click",e=>review(e.currentTarget.dataset.rv));

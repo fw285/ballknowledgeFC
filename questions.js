@@ -5,8 +5,7 @@
      {t:"The question", h:"A short hint under it"},
 
    Optional tags on player questions (add them after the hint):
-     cur:1  needs a current top-five-league club (never drawn on the
-            "Outside the bubble" dice roll)
+     cur:1  about a current club or this season (the referee looks it up)
      old:1  needs a long career (never drawn on the "Youth only" roll)
      nat:1  about nationality (never drawn on the "No repeats" roll)
      gk:1   only a goalkeeper can answer it (never drawn once the picker's
