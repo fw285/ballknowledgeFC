@@ -377,7 +377,7 @@ const FIREBASE_CONFIG = {
 };
 const API_URL = "/api/claude";
 /* Both devices must run the same version of the game. Bump this whenever the game logic changes. */
-const APP_VERSION = "2026-10-16a";
+const APP_VERSION = "2026-10-16b";
 
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { initializeFirestore, doc as fdoc, getDoc, setDoc, onSnapshot as fsnap, collection as fcol, query as fquery, orderBy as forder, limit as flimit, runTransaction } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -462,12 +462,26 @@ const configured = !!FIREBASE_CONFIG.projectId;
          nat = nationality-based (clashes with "no repeats")
    ============================================================ */
 import { WHEEL_ODDS, WHEEL_POOL } from "./random-players.js";
-import { PLAYER_QUESTIONS, CLUBS, NATIONS, CLUB_PAIRS, NAT_CLUB_QUESTIONS, QUESTION_MIX, MANAGER_QUESTIONS, STADIUM_QUESTIONS, AURA_QUESTIONS } from "./questions.js";
+import { PLAYER_QUESTIONS, CLUBS, NATIONS, CLUB_PAIRS, NAT_CLUB_QUESTIONS, QUESTION_MIX, QUESTION_LEVELS, MANAGER_QUESTIONS, STADIUM_QUESTIONS, AURA_QUESTIONS } from "./questions.js";
 const qid = t => String(t).toLowerCase().replace(/[^a-z0-9]+/g," ").trim().slice(0,80);
 const SPECIAL_CATS = PLAYER_QUESTIONS.map(c=>({...c, id:"s:"+qid(c.t)}));
-const PAIR_CATS = CLUB_PAIRS.map(([a,b])=>({t:`Has played for both ${a} and ${b}`, h:"Any spells, in either order. Loans count.", id:"p:"+a+"|"+b}));
-const CLUB_CATS = CLUBS.map(c=>({t:`Has played for ${c}`, h:"Any spell, any season. Loans count.", id:"c:"+c}));
-const NAT_CATS = NATIONS.map(n=>({t:`Represents ${n}`, h:"Senior national team. One cap is enough.", nat:1, id:"n:"+n}));
+// question difficulty: e / m / h on every question; clubs and nations carry it after a "|", club pairs as a third item
+const TIER = x => x==="e"||x==="h" ? x : "m";
+const splitTier = str => { const [name, t] = String(str).split("|"); return [name.trim(), TIER(t)]; };
+const PAIR_CATS = CLUB_PAIRS.map(([a,b,d])=>({t:`Has played for both ${a} and ${b}`, h:"Any spells, in either order. Loans count.", id:"p:"+a+"|"+b, d:TIER(d)}));
+const CLUB_CATS = CLUBS.map(x=>{ const [c,d]=splitTier(x); return {t:`Has played for ${c}`, h:"Any spell, any season. Loans count.", id:"c:"+c, d}; });
+const NAT_CATS = NATIONS.map(x=>{ const [n,d]=splitTier(x); return {t:`Represents ${n}`, h:"Senior national team. One cap is enough.", nat:1, id:"n:"+n, d}; });
+const QLEVELS = {easy:"Easy", medium:"Medium", hard:"Hard"};
+const qlevelOf = st => QLEVELS[st?.settings?.qlevel] ? st.settings.qlevel : "medium";
+// Pick a difficulty tier for this question by the game's mix, among the tiers that still have questions left.
+function pickTier(st, has){
+  const w = (QUESTION_LEVELS||{})[qlevelOf(st)] || {e:.2,m:.6,h:.2};
+  let opts = ["e","m","h"].filter(t=>has(t) && (w[t]||0)>0);
+  if(!opts.length){ const near = {easy:["e","m","h"], medium:["m","e","h"], hard:["h","m","e"]}[qlevelOf(st)]; const t=near.find(has); return t||null; }
+  let r = Math.random()*opts.reduce((a,t)=>a+w[t],0);
+  for(const t of opts){ r-=w[t]; if(r<=0) return t; }
+  return opts[opts.length-1];
+}
 const NATCLUB_CATS = (NAT_CLUB_QUESTIONS||[]).map(c=>({...c, nat:1, id:"x:"+qid(c.t)}));
 const MANAGER_CATS = MANAGER_QUESTIONS, STADIUM_CATS = STADIUM_QUESTIONS, AURA_CATS = AURA_QUESTIONS;
 const AURA_TRIGGERS = {
@@ -527,7 +541,7 @@ function slotsOf(form){ return FORMATIONS[form].map(([k,label,g,x,y])=>({k,label
 // The dice for the current pick: a question change re-rolls it for that player only, the opponent keeps the round's roll.
 const curDice = r => !r ? null : (r.turns && r.turns[r.ti] && r.turns[r.ti].dice!=null ? r.turns[r.ti].dice : r.dice);
 const pickMs = r => r && curDice(r)===10 ? SPEED_MS : PICK_MS;
-const CHOOSE_MS = 10000;   // Rival's choice: how long the opponent gets to pick your question
+const CHOOSE_MS = 20000;   // Rival's choice: how long the opponent gets to pick your question
 
 /* ============================================================
    State + platform
@@ -567,6 +581,8 @@ function drawCat(st, bank){
   const list = bank==="manager"?MANAGER_CATS:bank==="stadium"?STADIUM_CATS:AURA_CATS;
   let pool = list.map((c,i)=>i).filter(i=>!(st.used[bank]||[]).includes(i));
   if(!pool.length){ pool = list.map((c,i)=>i); st.used[bank]=[]; }
+  const tier = pickTier(st, t=>pool.some(i=>TIER(list[i].d)===t));
+  if(tier) pool = pool.filter(i=>TIER(list[i].d)===tier);
   const i = rand(pool); st.used[bank]=[...(st.used[bank]||[]), i];
   return {...list[i], bank};
 }
@@ -583,6 +599,9 @@ function drawPlayerCat(st, dice, seats){
   const mix = QUESTION_MIX||{};
   let buckets = [[SPECIAL_CATS.filter(ok),mix.questions??52],[PAIR_CATS.filter(ok),mix.clubPairs??16],[CLUB_CATS.filter(ok),mix.clubs??16],[NAT_CATS.filter(ok),mix.nations??16],[NATCLUB_CATS.filter(ok),mix.natClubs??14]].filter(b=>b[0].length && b[1]>0);
   if(!buckets.length){ st.usedIds=[]; buckets=[[SPECIAL_CATS.filter(c=>catFits(c,dice) && !(noGK && c.gk)),1]]; }
+  // the game's question difficulty: choose a tier first, then the usual mix of question kinds within it
+  const tier = pickTier(st, t=>buckets.some(b=>b[0].some(c=>TIER(c.d)===t)));
+  if(tier) buckets = buckets.map(([l,w])=>[l.filter(c=>TIER(c.d)===tier),w]).filter(b=>b[0].length);
   let r = Math.random()*buckets.reduce((s,b)=>s+b[1],0), pool=buckets[0][0];
   for(const b of buckets){ r-=b[1]; if(r<=0){ pool=b[0]; break; } }
   const c = rand(pool); st.usedIds.push(c.id);
@@ -1226,17 +1245,20 @@ async function submitPracticeScore(){
   const a=practiceAvg(st); if(!a) return;
   const items=st.review?.items||{};
   const correct=(st.qlog||[]).filter((q,i)=>q.ok===true || (q.ok===null && items[i]?.correct===true)).length;
-  const entry={id:st.id+"-"+n, team:st.players.A.team, formation:st.squads.A.formation, avg:a.avg, filled:a.filled, of:a.of, correct, asked:(st.qlog||[]).length, star:a.star, at:Date.now()};
+  const entry={id:st.id+"-"+n, level:qlevelOf(st), team:st.players.A.team, formation:st.squads.A.formation, avg:a.avg, filled:a.filled, of:a.of, correct, asked:(st.qlog||[]).length, star:a.star, at:Date.now()};
   const ok=await commit(s=>{ if(s.phase!=="practice" || s.practice?.lbFinal===n || (stage==="early" && s.practice?.lb===n)) return false; s.practice={...s.practice, lb:n, last:entry, ...(stage==="final"?{lbFinal:n}:{})}; });
   if(!ok) return;
   try{
     const ref=db.doc(LB_DOC);
     const snap=await ref.get(); if(!snap.exists) await ref.set({id:"_practice_top", leaderboard:true, entries:[]});
-    await ref.update(d=>{ const e=(d.entries||[]).filter(x=>x && x.id!==entry.id); e.push(entry); e.sort((x,y)=>y.avg-x.avg || y.correct-x.correct || x.at-y.at); d.entries=e.slice(0,10); });
+    // one top ten per question difficulty (entries from before difficulties count as medium)
+    await ref.update(d=>{ const e=(d.entries||[]).filter(x=>x && x.id!==entry.id); e.push(entry); e.sort((x,y)=>y.avg-x.avg || y.correct-x.correct || x.at-y.at);
+      const per={}; d.entries=e.filter(x=>{ const l=x.level||"medium"; per[l]=(per[l]||0)+1; return per[l]<=10; }); });
   }catch(e){ console.warn("leaderboard", e); }
 }
-function lbHTML(myId, title){
-  const rows=(LB||[]).slice(0,10);
+const lbRows = level => (LB||[]).filter(e=>(e.level||"medium")===level).slice(0,10);
+function lbHTML(myId, title, level){
+  const rows=lbRows(level||"medium");
   return `<div class="lb"><div class="eyebrow">${esc(title||"Practice leaderboard · top 10 by average rating")}</div>
     ${rows.length?`<ol>${rows.map((e,i)=>`<li class="${e.id===myId?"me":""}"><span class="rk num">${i+1}</span><span class="tm"><b>${esc(e.team)}</b> <small>${e.correct}/${e.asked} right · ${e.filled}/${e.of} spots filled${e.star?` · best: ${esc(e.star)}`:""}</small></span><span class="av num">${Number(e.avg).toFixed(1)}</span></li>`).join("")}</ol>`
       :`<div class="muted" style="font-size:13px">No practice squads yet. Finish a practice draft to get on the board.</div>`}
@@ -1265,9 +1287,9 @@ function practiceHTML(){
     <div class="rvhead"><div><div class="eyebrow">Practice review · ${esc(G.players.A.team)}</div><h2 style="margin:4px 0 0">How did you do?</h2></div>
       <div style="text-align:right"><div class="rvscore num">${right}/${ql.length}</div><div class="muted" style="font-size:13px">correct${open?` · ${open} still being checked`:""}${hist.length?` · last time ${hist[hist.length-1].score}/${hist[hist.length-1].of}`:""}</div></div></div>
     ${status}
-    ${(()=>{ const last=G.practice?.last, a=last||practiceAvg(G), myId=G.id+"-"+(G.practice?.n||1), rank=(LB||[]).findIndex(e=>e.id===myId);
-      const line = !a ? "" : `<div class="notice"><b>Your squad averages ${Number(a.avg).toFixed(1)}</b> (${a.filled}/${a.of} spots filled${a.star?`, best: ${esc(a.star)}`:""}). ${!last?"Putting it on the leaderboard…":rank>=0?`That's <b>#${rank+1}</b> on the leaderboard.`:(LB||[]).length>=10?`Not in the top 10 this time: 10th is ${Number(LB[9].avg).toFixed(1)}.`:""}</div>`;
-      return line + lbHTML(myId); })()}
+    ${(()=>{ const lv=qlevelOf(G), board=lbRows(lv), last=G.practice?.last, a=last||practiceAvg(G), myId=G.id+"-"+(G.practice?.n||1), rank=board.findIndex(e=>e.id===myId);
+      const line = !a ? "" : `<div class="notice"><b>Your squad averages ${Number(a.avg).toFixed(1)}</b> (${a.filled}/${a.of} spots filled${a.star?`, best: ${esc(a.star)}`:""}). ${!last?"Putting it on the leaderboard…":rank>=0?`That's <b>#${rank+1}</b> on the leaderboard.`:board.length>=10?`Not in the top 10 this time: 10th is ${Number(board[9].avg).toFixed(1)}.`:""}</div>`;
+      return line + lbHTML(myId, `Practice leaderboard · ${QLEVELS[lv]} questions · top 10 by average rating`, lv); })()}
     ${mine?`<div class="btnrow"><button class="btn gold" id="practiceagain">Practice again</button><span class="muted" style="align-self:center;font-size:13px">New questions, same formation.</span></div>`:""}
     ${cards}
     ${mine&&ql.length>3?`<div class="btnrow"><button class="btn gold" id="practiceagain2">Practice again</button></div>`:""}
@@ -1481,13 +1503,14 @@ document.addEventListener("visibilitychange", ()=>{ if(document.visibilityState=
 window.addEventListener("focus", ()=>refreshGame());
 function leaveGame(){ if(unsubGame) unsubGame(); unsubGame=null; G=null; gameRef=null; mySeat=null; PB=null; if(raf) cancelAnimationFrame(raf); raf=null; try{ history.replaceState(null,"",location.pathname); }catch(e){} render(); }
 
+function uiQLevel(){ const v=$("#qlevel")?.value; const q = QLEVELS[v] ? v : (QLEVELS[lsGet("dn_qlevel")] ? lsGet("dn_qlevel") : "medium"); lsSet("dn_qlevel", q); return q; }
 async function createGame(){
   const team = ($("#team")?.value||"").trim().slice(0,24) || "My XI";
   const formation = $("#formation")?.value||"4-3-3";
   const refTier = $("#reftier")?.value||"quick";
   lsSet("dn_team", team); lsSet("dn_form", formation);
   const chars="ABCDEFGHJKMNPQRSTUVWXYZ23456789"; let id=""; for(let i=0;i<5;i++) id+=chars[Math.floor(Math.random()*chars.length)];
-  const st = {id, appV:APP_VERSION, lastV:APP_VERSION, vseq:1, createdAt:Date.now(), updatedAt:Date.now(), seq:1, phase:"lobby", settings:{refTier}, refOk:{}, usedIds:seenIds(), players:{A:{uid:me.id, team, formation}, B:null}, log:[]};
+  const st = {id, appV:APP_VERSION, lastV:APP_VERSION, vseq:1, createdAt:Date.now(), updatedAt:Date.now(), seq:1, phase:"lobby", settings:{refTier, qlevel:uiQLevel()}, refOk:{}, usedIds:seenIds(), players:{A:{uid:me.id, team, formation}, B:null}, log:[]};
   pushLog(st, `${team} created the game. Waiting for an opponent.`, "A");
   try{ await db.doc("games/"+id).set(st); syncLobby(st); openGame(id); }
   catch(e){ console.warn(e); canWrite=false; render(); }
@@ -1500,7 +1523,7 @@ async function createSolo(){
   lsSet("dn_team", team); lsSet("dn_form", formation); lsSet("dn_level", level);
   const chars="ABCDEFGHJKMNPQRSTUVWXYZ23456789"; let id=""; for(let i=0;i<5;i++) id+=chars[Math.floor(Math.random()*chars.length)];
   const botForm = rand(Object.keys(FORMATIONS));
-  const st = {id, appV:APP_VERSION, lastV:APP_VERSION, vseq:1, solo:{level}, createdAt:Date.now(), updatedAt:Date.now(), seq:1, phase:"lobby", settings:{refTier}, refOk:{}, usedIds:seenIds(),
+  const st = {id, appV:APP_VERSION, lastV:APP_VERSION, vseq:1, solo:{level}, createdAt:Date.now(), updatedAt:Date.now(), seq:1, phase:"lobby", settings:{refTier, qlevel:uiQLevel()}, refOk:{}, usedIds:seenIds(),
     players:{A:{uid:me.id, team, formation}, B:{uid:"claude-bot", team:`Claude (${BOT[level].label})`, formation:botForm, bot:true}}, log:[]};
   pushLog(st, `${team} take on Claude on ${BOT[level].label}. Claude lines up in a ${botForm}.`, "A");
   startDraft(st);
@@ -1513,7 +1536,7 @@ async function createPractice(){
   const refTier = $("#reftier")?.value||"quick";
   lsSet("dn_team", team); lsSet("dn_form", formation);
   const chars="ABCDEFGHJKMNPQRSTUVWXYZ23456789"; let id=""; for(let i=0;i<5;i++) id+=chars[Math.floor(Math.random()*chars.length)];
-  const st = {id, appV:APP_VERSION, lastV:APP_VERSION, vseq:1, solo:{level:"medium"}, practice:{at:Date.now(), n:1}, createdAt:Date.now(), updatedAt:Date.now(), seq:1, phase:"lobby", settings:{refTier}, refOk:{}, usedIds:seenIds(),
+  const st = {id, appV:APP_VERSION, lastV:APP_VERSION, vseq:1, solo:{level:"medium"}, practice:{at:Date.now(), n:1}, createdAt:Date.now(), updatedAt:Date.now(), seq:1, phase:"lobby", settings:{refTier, qlevel:uiQLevel()}, refOk:{}, usedIds:seenIds(),
     players:{A:{uid:me.id, team, formation}, B:{uid:"practice", team:"Practice", formation, bot:true}}, log:[]};
   pushLog(st, `${team}: practice draft. No opponent and no match. At the end Claude goes through every question with you.`, "A");
   startDraft(st);
@@ -1722,18 +1745,19 @@ function lobbyHTML(){
       <div class="field"><label for="team">Team name</label><input id="team" maxlength="24" placeholder="Brookline FC" value="${team}"></div>
       <div class="field"><label for="formation">Formation</label><select id="formation">${Object.keys(FORMATIONS).map(f=>`<option ${f===form?"selected":""}>${f}</option>`).join("")}</select></div>
       <div class="field"><label for="acode">Access code</label><input id="acode" type="password" autocomplete="off" placeholder="From the host" value="${esc(lsGet("dn_code")||"")}"></div>
+      <div class="field"><label for="qlevel">Question difficulty</label><select id="qlevel">${Object.entries(QLEVELS).map(([k,v])=>`<option value="${k}" ${(lsGet("dn_qlevel")||"medium")===k?"selected":""}>${v} questions</option>`).join("")}</select></div>
       <div class="field"><label for="reftier">Referee</label><select id="reftier"><option value="quick">Quick (up to 2 lookups)</option><option value="default">Thorough (up to 4 lookups)</option></select></div>
     </div>
     <div class="btnrow"><button class="btn blue" id="create" ${!db||!canWrite?"disabled":""}>Play a friend</button><span class="muted" style="align-self:center;font-size:13px">Creates a game. Send your friend the code.</span></div>
     <div class="solo">
-      <div class="eyebrow">Or play against Claude</div>
+      <div class="eyebrow">Or play against Claude · Claude's skill level</div>
       <div class="seg big" role="group" aria-label="Difficulty">${Object.entries(BOT).map(([k,v])=>`<button type="button" data-botlevel="${k}" class="${(uiLevel||lsGet("dn_level")||"medium")===k?"sel":""}"><b>${v.label}</b><span>${esc(v.blurb)}</span></button>`).join("")}</div>
-      <div class="btnrow"><button class="btn red" id="createsolo" ${!db||!canWrite?"disabled":""}>Play Claude</button><span class="muted" style="align-self:center;font-size:13px">Same draft, same referee, same match engine. Claude picks in character.</span></div>
+      <div class="btnrow"><button class="btn red" id="createsolo" ${!db||!canWrite?"disabled":""}>Play Claude</button><span class="muted" style="align-self:center;font-size:13px">Same draft, same referee, same match engine. Claude picks in character. Its skill level is separate from the question difficulty above.</span></div>
     </div>
     <div class="practice-box">
       <div class="eyebrow">Or practise your ball knowledge</div>
-      <div class="btnrow"><button class="btn gold" id="createpractice" ${!db||!canWrite?"disabled":""}>Practice draft</button><span class="muted" style="align-self:center;font-size:13px">Just you and the questions: no opponent, no match. At the end Claude goes through every question, with the players you could have picked and a bit about each.</span></div>
-      <details class="lbwrap"><summary>Leaderboard: top 10 practice squads</summary>${lbHTML(null, " ")}</details>
+      <div class="btnrow"><button class="btn gold" id="createpractice" ${!db||!canWrite?"disabled":""}>Practice draft</button><span class="muted" style="align-self:center;font-size:13px">Just you and the questions (at the difficulty set above): no opponent, no match. At the end Claude goes through every question, with the players you could have picked and a bit about each.</span></div>
+      <details class="lbwrap"><summary>Leaderboards: top 10 practice squads for each question difficulty</summary><div style="display:grid;gap:10px;margin-top:8px">${Object.entries(QLEVELS).map(([k,v])=>lbHTML(null, `${v} questions`, k)).join("")}</div></details>
     </div>
     <details class="quick"><summary>Quick match: skip the draft</summary>
       <p class="muted" style="margin:0 0 10px">Two random squads from the wheel's player pool, straight to the team talk. Claude scouts every player and manager just like in a drafted game, so it plays the same. For testing tactics and the match engine.</p>
@@ -1746,10 +1770,11 @@ function lobbyHTML(){
     <details class="rules"><summary>How it works</summary>
       <ul>
         <li>11 starter rounds, then 3 bench rounds. Picks alternate who goes first, and a ten-sided die changes each round.</li>
+        <li><b>Question difficulty</b> (set by whoever creates the game): Easy is mostly easy questions with some medium, Medium mixes all three, Hard is mostly hard with some medium. Against Claude, this is separate from Claude's skill level.</li>
         <li>You have <b>60 seconds</b> per pick.</li>
         <li>Stuck? Once per game you can swap your question for a new one, and your clock resets. Or give up and take your chances on the wheel.</li>
         <li>Claude rules on each pick. Your opponent can accept, overrule, or use their one <b>veto</b> (the player is banned for both of you).</li>
-        <li>Run out of time, give up or get one wrong and that slot goes to <b>the wheel</b> after the player rounds: a random player, and good ones are rare (50% under 75, 35% 75–84, 10% 85–89, 5% 90+). No slot is ever left empty.</li>
+        <li>Run out of time, give up or get one wrong and that slot goes to <b>the wheel</b> after the player rounds: a random player, and good ones are rare (60% under 75, 25% 75–84, 10% 85–89, 5% 90+). No slot is ever left empty.</li>
         <li>Max 3 retired players. Everyone plays at their peak. No duplicates.</li>
         <li>Then pick a manager, a home stadium, an aura, and a captain. Set your tactics in the team talk, choose how much of the match to watch, and a 2D match engine plays it out with your players' real attributes and playstyles.</li>
       </ul>
@@ -1771,7 +1796,7 @@ function waitingHTML(){
     <div class="eyebrow">Game ${esc(G.id)}</div>
     <h2>${mine?"Waiting for<br><em>your opponent</em>":"Join this game"}</h2>
     ${mine?`<p>Send your friend the code <b class="num" style="font-family:var(--dot);font-size:22px;letter-spacing:.12em">${esc(G.id)}</b>. They open this page, find the game in the list, and press Join. The draft starts the moment they do.</p>`:
-    `<p>${esc(G.players.A.team)} (${esc(G.players.A.formation)}) is waiting for an opponent.</p>
+    `<p>${esc(G.players.A.team)} (${esc(G.players.A.formation)}) is waiting for an opponent. <b>${esc(QLEVELS[qlevelOf(G)])} questions.</b></p>
      <div class="formrow"><div class="field"><label for="team">Team name</label><input id="team" maxlength="24" value="${esc(lsGet("dn_team")||"")}"></div>
      <div class="field"><label for="formation">Formation</label><select id="formation">${Object.keys(FORMATIONS).map(f=>`<option>${f}</option>`).join("")}</select></div>
      <div class="field"><label for="acode">Access code</label><input id="acode" type="password" autocomplete="off" placeholder="From the host" value="${esc(lsGet("dn_code")||"")}"></div></div>
@@ -1793,7 +1818,7 @@ function draftHTML(){
   const left = mySeat||"A", right=other(left);
   return `<section class="board">
      <div style="min-width:0">
-       <div class="meta"><span>${esc(roundLabel(r))}</span><span>·</span><span style="color:${picker==="A"?"var(--cobalt-soft)":"var(--red-soft)"}">${r.kind==="spin"?"Both teams":esc(G.players[picker].team)+" to pick"}</span></div>
+       <div class="meta"><span>${esc(roundLabel(r))}</span><span>·</span><span>${esc(QLEVELS[qlevelOf(G)])} questions</span><span>·</span><span style="color:${picker==="A"?"var(--cobalt-soft)":"var(--red-soft)"}">${r.kind==="spin"?"Both teams":esc(G.players[picker].team)+" to pick"}</span></div>
        <div class="cat">${esc(r.step==="choose" ? "Rival's choice" : cat.t)}</div>
        <div class="hint">${esc(r.step==="choose" ? `${G.players[turn.chooser]?.team||"The opponent"} is picking which of two questions ${G.players[picker].team} answers.` : cat.h||"")}</div>
        ${curDice(r)?(()=>{ const d=curDice(r); return `<div class="dicefx">${dieHTML(d, rolledKey!==diceKey(r) ? "roll":"")}<div><b>${esc(DICE[d].n)}</b><div style="font-size:13px;opacity:.8">${esc(DICE[d].d)}${turn.dice!=null?` <span style="opacity:.8">(re-rolled for ${esc(G.players[picker].team)})</span>`:""}</div></div></div>`; })():""}
@@ -1898,7 +1923,7 @@ function panelHTML(){
     const ch=turn.chooser, opts=turn.opts||[];
     const optHTML = btn => opts.map((c,i)=>btn ? `<button class="slotbtn" data-choose="${i}" style="text-align:left;padding:12px;display:grid;gap:4px"><b>${esc(c.t)}</b><span class="muted" style="font-size:12px">${esc(c.h||"")}</span></button>`
       : `<div style="border:2px solid var(--rule);border-radius:10px;padding:10px"><b>${esc(c.t)}</b><div class="muted" style="font-size:12px">${esc(c.h||"")}</div></div>`).join("");
-    body = mySeat===ch ? `<h4>Rival's choice: pick ${team(picker)}'s question</h4><p class="muted" style="margin:0">Choose the one you think they'll struggle with. 10 seconds, then it's random.</p><div style="display:grid;gap:8px">${optHTML(true)}</div>`
+    body = mySeat===ch ? `<h4>Rival's choice: pick ${team(picker)}'s question</h4><p class="muted" style="margin:0">Choose the one you think they'll struggle with. 20 seconds, then it's random.</p><div style="display:grid;gap:8px">${optHTML(true)}</div>`
       : G.solo && ch==="B" ? `<h4><span class="spin"></span> Claude is choosing your question</h4><p class="muted" style="margin:0">One of these two. Your clock starts once it's picked.</p><div style="display:grid;gap:8px">${optHTML(false)}</div>`
       : `<h4>${team(ch)} is choosing ${mySeat===picker?"your":team(picker)+"'s"} question</h4><p class="muted" style="margin:0">One of these two. The pick clock starts once it's chosen.</p><div style="display:grid;gap:8px">${optHTML(false)}</div>`;
   }

@@ -15,8 +15,8 @@
    W winger, ST striker. Add or remove names freely.
    ============================================================ */
 export const WHEEL_ODDS = [
-  { label: "Under 75", min: 0, max: 74, chance: 50 },
-  { label: "75–84", min: 75, max: 84, chance: 35 },
+  { label: "Under 75", min: 0, max: 74, chance: 60 },
+  { label: "75–84", min: 75, max: 84, chance: 25 },
   { label: "85–89", min: 85, max: 89, chance: 10 },
   { label: "90+", min: 90, max: 99, chance: 5 }
 ];
