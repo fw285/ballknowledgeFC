@@ -377,7 +377,7 @@ const FIREBASE_CONFIG = {
 };
 const API_URL = "/api/claude";
 /* Both devices must run the same version of the game. Bump this whenever the game logic changes. */
-const APP_VERSION = "2026-10-15b";
+const APP_VERSION = "2026-10-16a";
 
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { initializeFirestore, doc as fdoc, getDoc, setDoc, onSnapshot as fsnap, collection as fcol, query as fquery, orderBy as forder, limit as flimit, runTransaction } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -745,8 +745,9 @@ function cleanTactics(t){
 // Practice: keep every question and what you answered, for Claude's review at the end.
 function noteAnswer(st, p, pick, ok, reason, how, slot){
   const r=st.round; if(!st.practice || p!=="A" || !r || r.kind==="captain") return;
-  const c=turnCat(r);
-  (st.qlog=st.qlog||[]).push({kind:r.kind, t:c.t, h:c.h||"", dice:curDice(r)||null, now:!!(c.cur || /currently|right now|this season|on loan|EA FC 27|2026/i.test(c.t||"")), pick:pick||null, ok: ok===null ? null : !!ok, reason:String(reason||"").slice(0,300), how, slot:slot||null});
+  const c=turnCat(r), d=curDice(r);
+  const nats = d===4 ? [...new Set(squadPlayers(st.squads.A).map(x=>x.nationalTeam||x.nationality).filter(Boolean))] : null;
+  (st.qlog=st.qlog||[]).push({kind:r.kind, t:c.t, h:c.h||"", dice:d||null, ...(nats?{nats}:{}), now:!!(c.cur || /currently|right now|this season|on loan|EA FC 27|2026/i.test(c.t||"")), pick:pick||null, ok: ok===null ? null : !!ok, reason:String(reason||"").slice(0,300), how, slot:slot||null});
 }
 function placeResult(st, p, turn, kind, final, ruling, pending){
   const sq = st.squads[p], team = st.players[p].team, r=st.round;
@@ -1139,7 +1140,14 @@ function botReview(){
    ============================================================ */
 let rvBusy=false;
 const RV_KIND = {starter:"a player", sub:"a player", manager:"a manager", stadium:"a stadium", aura:"an aura (a famous moment, ritual, chant or curse)"};
-function rvRule(q){ const d=q.dice && DICE[q.dice]; return d && [1,3,7,8].includes(q.dice) ? `${d.n}: ${d.ai||d.d}` : ""; }
+// The dice rule that changes who counts as a right answer, worded for the reviewer (Speed round and Normal round change nothing).
+const RV_RULES = {
+  3: q=>"Youth only: he must be 23 or younger today.",
+  7: q=>"Veterans only: he must be 31 or older today, or retired.",
+  8: q=>"Hidden gem: no superstars. His prime must be rated 84 or lower on the EA FC / FIFA scale.",
+  4: q=>`No repeats: he can't share a nationality with anyone already in the fan's squad${q.nats&&q.nats.length?` (${q.nats.join(", ")})`:" (nobody yet, so any nationality)"}.`
+};
+function rvRule(q){ const f = q.dice && q.kind!=="manager" && q.kind!=="stadium" && q.kind!=="aura" && RV_RULES[q.dice]; return f ? f(q) : ""; }
 function rvTodo(){ const it=G?.review?.items||{}; return (G?.qlog||[]).map((q,i)=>i).filter(i=>!it[i]); }
 async function runPracticeReview(){
   if(rvBusy || !sample || !G?.qlog?.length) return;
@@ -1162,12 +1170,13 @@ async function reviewBatch(gid, qlog, idx){
     const ans = !q.pick ? `The fan had no answer (${q.how==="timeout"?"ran out of time":"gave up"}).`
       : q.ok===null ? `The fan answered "${q.pick}". The referee couldn't rule on it, so YOU decide: set "correct" to true or false for this question, and say why in the verdict.`
       : `The fan answered "${q.pick}", which was ruled ${q.ok?"CORRECT":"WRONG"}${q.reason?` (referee: ${q.reason})`:""}.`;
-    return `${i}. Pick ${RV_KIND[q.kind]||"a player"}: "${q.t}" (${q.h})${rule?`\n   Extra rule this round: ${rule}`:""}\n   ${ans}`; }).join("\n");
+    return `${i}. Pick ${RV_KIND[q.kind]||"a player"}: "${q.t}" (${q.h})${rule?`\n   DICE RULE THIS ROUND (part of the question): ${rule}`:""}\n   ${ans}`; }).join("\n");
   const prompt = `You're a friendly, sharp football expert going through a practice draft with a fan, question by question, to help them build their ball knowledge. Everyone counts at their prime; retired players are fine unless a rule says otherwise.
 
 For each question below:
-- "verdict": one short sentence on the fan's answer. If it was right, say so and add a bit of colour about him. If it was wrong, say plainly why it doesn't fit. If they had no answer, say so kindly.
-- "answers": the 5 best correct answers the fan didn't give: mostly the famous ones a fan should know, plus one or two satisfying deeper cuts. For each, "name" and "why": one or two sentences of career context that show why he fits (clubs, seasons, the moment, the trophy). Every answer must genuinely fit the question and the extra rule. Only state facts you are sure of, and leave out any number you aren't sure of.
+- "verdict": one short sentence on the fan's answer. If it was right, say so and add a bit of colour about him. If it was wrong, say plainly why it doesn't fit (the question or the dice rule). If they had no answer, say so kindly.
+- "answers": the 5 best correct answers the fan didn't give: mostly the famous ones a fan should know, plus one or two satisfying deeper cuts. For each, "name" and "why": one or two sentences of career context that show why he fits (clubs, seasons, the moment, the trophy). Only state facts you are sure of, and leave out any number you aren't sure of.
+- A DICE RULE is part of the question. Every answer you suggest must fit the question AND the dice rule: check his age today for Youth only and Veterans only, his prime rating for Hidden gem, and his nationality for No repeats, and say in "why" how he fits the rule. If only a few players fit both, give fewer than 5 rather than one that breaks the rule.
 For a manager, stadium or aura question, the answers are managers, stadiums or moments instead of players.
 
 QUESTIONS:
@@ -1210,14 +1219,15 @@ function practiceAvg(st){
 }
 async function submitPracticeScore(){
   const st=G; if(!db || !st?.practice || st.phase!=="practice" || mySeat!=="A") return;
-  const n=st.practice.n||1; if(st.practice.lb===n) return;
-  if(sample && rvTodo().length) return;   // wait until the review has settled every pick
-  const k="lb"+st.id+n; if(fired[k]) return; fired[k]=1;
+  // straight onto the board when the draft ends; updated once the review has settled any picks the ref couldn't rule on
+  const n=st.practice.n||1, stage = sample && rvTodo().length ? "early" : "final";
+  if(st.practice.lbFinal===n || (stage==="early" && st.practice.lb===n)) return;
+  const k="lb"+st.id+n+stage; if(fired[k]) return; fired[k]=1;
   const a=practiceAvg(st); if(!a) return;
   const items=st.review?.items||{};
   const correct=(st.qlog||[]).filter((q,i)=>q.ok===true || (q.ok===null && items[i]?.correct===true)).length;
   const entry={id:st.id+"-"+n, team:st.players.A.team, formation:st.squads.A.formation, avg:a.avg, filled:a.filled, of:a.of, correct, asked:(st.qlog||[]).length, star:a.star, at:Date.now()};
-  const ok=await commit(s=>{ if(s.phase!=="practice" || s.practice?.lb===n) return false; s.practice={...s.practice, lb:n, last:entry}; });
+  const ok=await commit(s=>{ if(s.phase!=="practice" || s.practice?.lbFinal===n || (stage==="early" && s.practice?.lb===n)) return false; s.practice={...s.practice, lb:n, last:entry, ...(stage==="final"?{lbFinal:n}:{})}; });
   if(!ok) return;
   try{
     const ref=db.doc(LB_DOC);
@@ -1256,7 +1266,7 @@ function practiceHTML(){
       <div style="text-align:right"><div class="rvscore num">${right}/${ql.length}</div><div class="muted" style="font-size:13px">correct${open?` · ${open} still being checked`:""}${hist.length?` · last time ${hist[hist.length-1].score}/${hist[hist.length-1].of}`:""}</div></div></div>
     ${status}
     ${(()=>{ const last=G.practice?.last, a=last||practiceAvg(G), myId=G.id+"-"+(G.practice?.n||1), rank=(LB||[]).findIndex(e=>e.id===myId);
-      const line = !a ? "" : `<div class="notice"><b>Your squad averages ${Number(a.avg).toFixed(1)}</b> (${a.filled}/${a.of} spots filled${a.star?`, best: ${esc(a.star)}`:""}). ${!last?"It goes on the leaderboard once the review is done.":rank>=0?`That's <b>#${rank+1}</b> on the leaderboard.`:(LB||[]).length>=10?`Not in the top 10 this time: 10th is ${Number(LB[9].avg).toFixed(1)}.`:""}</div>`;
+      const line = !a ? "" : `<div class="notice"><b>Your squad averages ${Number(a.avg).toFixed(1)}</b> (${a.filled}/${a.of} spots filled${a.star?`, best: ${esc(a.star)}`:""}). ${!last?"Putting it on the leaderboard…":rank>=0?`That's <b>#${rank+1}</b> on the leaderboard.`:(LB||[]).length>=10?`Not in the top 10 this time: 10th is ${Number(LB[9].avg).toFixed(1)}.`:""}</div>`;
       return line + lbHTML(myId); })()}
     ${mine?`<div class="btnrow"><button class="btn gold" id="practiceagain">Practice again</button><span class="muted" style="align-self:center;font-size:13px">New questions, same formation.</span></div>`:""}
     ${cards}
@@ -1515,7 +1525,7 @@ async function practiceAgain(){
     const it=st.review?.items||{};
     st.history=[...(st.history||[]), {score: (st.qlog||[]).filter((q,i)=>q.ok===true || (q.ok===null && it[i]?.correct===true)).length, of:(st.qlog||[]).length}].slice(-10);
     delete st.review; st.qlog=[]; st.log=[]; st.usedIds=(st.usedIds||[]).slice(-140);
-    st.practice={...(st.practice||{}), n:(st.practice?.n||1)+1, lb:null, last:null};
+    st.practice={...(st.practice||{}), n:(st.practice?.n||1)+1, lb:null, lbFinal:null, last:null};
     pushLog(st, "New practice draft. Fresh questions.", "A"); startDraft(st); });
 }
 async function createQuick(){
