@@ -13,7 +13,7 @@
    across it. "Team frame" (u, v): u = distance from your own goal
    line, v = across the pitch from your left touchline.
    ============================================================ */
-export const ENGINE_VERSION = "3.2";
+export const ENGINE_VERSION = "3.3";
 export const DT = 0.1;                 // seconds of match time per tick
 const SUBSTEPS = 2, HS = DT / SUBSTEPS;
 export const L = 105, W = 68;
@@ -1371,20 +1371,34 @@ export function simulateMatch(input) {
     const bench = team.bench.filter(b => b.state === "bench" && b.G !== "GK");
     if (!bench.length) return;
     const fit = (b, slotG) => b.g0 === slotG ? 1 : (COVER[b.g0] || []).includes(slotG) ? 0.6 : 0;
-    // tired legs first, then a bad game; a booked defender late on is a risk worth removing
-    const need = p => (p.energy < 0.6 ? (0.6 - p.energy) * 4 : 0) + (p.rating < 6.2 ? (6.2 - p.rating) * 0.9 : 0)
-      + (p.yellow && min_ > 60 && (p.G === "DEF" || p.g === "DM") ? 0.3 : 0) + (p.meme ? 0.4 : 0) + (min_ > 72 ? 0.06 : 0);
+    // how much a player matters to this XI: his overall against the team's average (stars are kept on, weak links go first)
+    const outf = team.onPitch.filter(p => p.G !== "GK"), avgOvr = outf.reduce((t, p) => t + p.ovr, 0) / (outf.length || 1);
+    const imp = p => clamp((p.ovr - avgOvr) / 8, -1.2, 1.2);
+    // tired legs and a bad game, weighed by importance; a booked defender late on is a risk worth removing
+    const quality = clamp((min_ - 58) / 20, 0, 1);   // changes for quality (weak link off, better player on) build up from the hour mark
+    const need = p => {
+      const i = imp(p), keep = i > 0 ? 1 - 0.45 * i : 1;   // a star needs to be properly spent before he's taken off
+      return ((p.energy < 0.6 ? (0.6 - p.energy) * 4 : 0) + (p.rating < 6.2 ? (6.2 - p.rating) * 0.9 : 0)) * keep
+        + quality * max(0, -i) * 0.25 + (p.yellow && min_ > 60 && (p.G === "DEF" || p.g === "DM") ? 0.3 : 0) + (p.meme ? 0.4 : 0) + (min_ > 72 ? 0.06 : 0);
+    };
     const bar = (min_ < 60 ? 0.6 : 0.32) - 0.1 * smart;
     let best = null;
     for (const p of team.onPitch) {
       if (p.G === "GK" || p.enteredAt !== 0 || !p.slot) continue;
-      const n = need(p); if (n <= bar) continue;
-      for (const b of bench) { const f = fit(b, p.slot.g); if (!f) continue; const sc = n + 0.4 * f + 0.01 * (b.ovr - p.ovr); if (!best || sc > best.sc || (sc === best.sc && b.id < best.inn.id)) best = { sc, out: p, inn: b, tactical: false }; }
+      const n = need(p);
+      for (const b of bench) {
+        const f = fit(b, p.slot.g); if (!f) continue;
+        // a clearly better player on the bench makes the change worth it; a worse one makes it harder to justify
+        const up = 0.03 * (b.ovr - p.ovr);
+        if (n + quality * max(0, up) * smart <= bar) continue;
+        const sc = n + 0.4 * f + up - 0.15 * imp(p);   // between two candidates, the less important player goes
+        if (!best || sc > best.sc || (sc === best.sc && b.id < best.inn.id)) best = { sc, out: p, inn: b, tactical: false };
+      }
     }
     // chasing the game late: a midfielder makes way for an extra attacker
     if (!best && diff < 0 && min_ > 64) for (const p of team.onPitch) {
       if (p.enteredAt !== 0 || !p.slot || (p.slot.g !== "CM" && p.slot.g !== "DM")) continue;
-      for (const b of bench) { if (b.g0 !== "AM" && b.g0 !== "W" && b.g0 !== "ST") continue; const sc = (1 - p.energy) + 0.3 * (6.8 - p.rating) + 0.01 * b.ovr; if (!best || sc > best.sc) best = { sc, out: p, inn: b, tactical: true }; }
+      for (const b of bench) { if (b.g0 !== "AM" && b.g0 !== "W" && b.g0 !== "ST") continue; const sc = (1 - p.energy) + 0.3 * (6.8 - p.rating) - 0.3 * imp(p) + 0.01 * b.ovr; if (!best || sc > best.sc) best = { sc, out: p, inn: b, tactical: true }; }
     }
     if (!best) return;
     const { out, inn, tactical } = best;
@@ -1394,7 +1408,7 @@ export function simulateMatch(input) {
     team.onPitch.splice(team.onPitch.indexOf(out), 1); out.playing = false; out.state = "leaving"; out.tx = out.x; out.ty = out.y < CY ? -3 : W + 3; out.urg = 0;
     enter(inn); inn.x = L / 2 + (team.side === "A" ? -3 : 3); inn.y = -0.8; inn.energy = 1;
     S.lastSubTick = S.tick;
-    ev("sub", { team: team.side, p: inn.id, out: out.id, tactical, why: tactical ? "attack" : out.energy < 0.6 ? "tired" : out.rating < 6.2 ? "poor" : out.yellow ? "booked" : "fresh legs" });
+    ev("sub", { team: team.side, p: inn.id, out: out.id, tactical, why: tactical ? "attack" : out.energy < 0.6 ? "tired" : out.rating < 6.2 ? "poor" : out.yellow ? "booked" : inn.ovr > out.ovr + 2 ? "upgrade" : "fresh legs" });
   }
   function updateTactics(team) {
     const b = team.tacBase, m = team.momEff, diff = team.score - team.opp.score, mn = clockMin();

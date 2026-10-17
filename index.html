@@ -377,7 +377,7 @@ const FIREBASE_CONFIG = {
 };
 const API_URL = "/api/claude";
 /* Both devices must run the same version of the game. Bump this whenever the game logic changes. */
-const APP_VERSION = "2026-10-16b";
+const APP_VERSION = "2026-10-17a";
 
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { initializeFirestore, doc as fdoc, getDoc, setDoc, onSnapshot as fsnap, collection as fcol, query as fquery, orderBy as forder, limit as flimit, runTransaction } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -1379,7 +1379,7 @@ function templLine(e, sim){
     case "kickoff": return "We're under way.";
     case "ht": return `Half-time: ${tn("A")} ${e.score.A}–${e.score.B} ${tn("B")}.`;
     case "ft": return `Full-time: ${tn("A")} ${e.score.A}–${e.score.B} ${tn("B")}.`;
-    case "sub": return `${n(e.p)} comes on for ${n(e.out)}${e.why==="tired"?", who's out on his feet":e.why==="poor"?" after a poor game":e.why==="booked"?", who's on a yellow":""}.${e.tactical?" An attacking change.":""}`;
+    case "sub": return `${n(e.p)} comes on for ${n(e.out)}${e.why==="tired"?", who's out on his feet":e.why==="poor"?" after a poor game":e.why==="booked"?", who's on a yellow":e.why==="upgrade"?". A stronger player off the bench":""}.${e.tactical?" An attacking change.":""}`;
     case "yellow": return e.second ? `Second yellow for ${n(e.p)}.` : `Yellow card for ${n(e.p)}.`;
     case "red": return e.second ? `${n(e.p)} picks up a second yellow and he's off!` : `Straight red! ${n(e.p)} is sent off.`;
     case "penalty": return `Penalty! ${n(e.victim)} is brought down by ${n(e.p)}.`;
@@ -2310,7 +2310,7 @@ function bannerHTML(o, sim){
   if(o.kind==="pen") return `<div class="bn" style="color:${col}">Penalty!<small>${tn(e.team)}</small></div>`;
   if(o.kind==="red") return `<div class="bn"><i class="redcard"></i>Red card<small>${n(e.p)} · ${tn(e.team)}</small></div>`;
   if(o.kind==="aura") return `<div class="bn" style="color:var(--saffron)">Aura<small>${esc(e.name)}</small></div>`;
-  if(o.kind==="sub") return `<div class="subboard"><div class="row"><span class="tm" style="background:${e.team==="A"?COL.A:COL.B}">${tn(e.team)}</span><span class="in">▲ ${n(e.p)}</span><span class="out">▼ ${n(e.out)}</span></div>${e.why&&e.why!=="fresh legs"?`<div class="row" style="font-size:.7em;opacity:.8">${e.why==="tired"?"Out of gas":e.why==="poor"?"Off the pace today":e.why==="booked"?"On a yellow":e.why==="attack"?"Going for it":""}</div>`:""}</div>`;
+  if(o.kind==="sub") return `<div class="subboard"><div class="row"><span class="tm" style="background:${e.team==="A"?COL.A:COL.B}">${tn(e.team)}</span><span class="in">▲ ${n(e.p)}</span><span class="out">▼ ${n(e.out)}</span></div>${e.why&&e.why!=="fresh legs"?`<div class="row" style="font-size:.7em;opacity:.8">${e.why==="tired"?"Out of gas":e.why==="poor"?"Off the pace today":e.why==="booked"?"On a yellow":e.why==="attack"?"Going for it":e.why==="upgrade"?"Bringing on quality":""}</div>`:""}</div>`;
   if(o.kind==="so") return `<div class="bn" style="color:${e.scored?col:"#fff"}">${e.scored?"Scored!":"Missed!"}<small>${n(e.p)} · ${e.score.A}–${e.score.B}</small></div>`;
   return "";
 }
